@@ -12,9 +12,9 @@ internal static partial class HostCommands
 {
     private const string Usage = """
         Usage (Windows):
+          authbridge install            start the helper now and at logon, and add authbridge to PATH
           authbridge install-remote NAME [SSH OPTIONS...] DESTINATION
                                         install the client on a Linux machine and keep a tunnel to it
-          authbridge install-startup    start the helper at logon
           authbridge start | stop | status | serve
         """;
 
@@ -27,7 +27,7 @@ internal static partial class HostCommands
         ["serve"] => ServeAsync(),
         ["start"] => StartAsync(),
         ["stop"] => StopAsync(),
-        ["install-startup"] => Task.FromResult(InstallStartup()),
+        ["install"] => InstallAsync(),
         ["install-remote", var name, .. var ssh] when ssh.Length > 0 => InstallRemoteAsync(name, ssh),
         _ => Task.FromResult(Program.Fail(Usage)),
     };
@@ -136,13 +136,31 @@ internal static partial class HostCommands
         return 0;
     }
 
-    private static int InstallStartup()
+    /// <summary>Starts the helper now and at logon, and adds this folder to the user PATH.</summary>
+    private static Task<int> InstallAsync()
     {
         var command = File.Exists(Windowless) ? $"\"{Windowless}\" serve" : $"\"{Environment.ProcessPath}\" start";
-        using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-        run.SetValue("authbridge", command);
+        using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+            run.SetValue("authbridge", command);
         Console.WriteLine($"The helper starts at logon: {command}");
-        return 0;
+
+        var folder = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
+        using var environment = Registry.CurrentUser.CreateSubKey("Environment");
+        // Unexpanded, so that entries such as %USERPROFILE%\bin keep working.
+        var path = environment.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
+        var entries = path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(entry => Path.TrimEndingDirectorySeparator(Environment.ExpandEnvironmentVariables(entry)));
+        if (entries.Contains(folder, StringComparer.OrdinalIgnoreCase))
+            Console.WriteLine($"{folder} is already on your PATH");
+        else
+        {
+            var kind = path.Length > 0 ? environment.GetValueKind("Path") : RegistryValueKind.ExpandString;
+            environment.SetValue("Path", path.Length == 0 || path.EndsWith(';') ? path + folder : $"{path};{folder}", kind);
+            // Tells running programs such as Explorer, so that terminals started from now on see the new PATH.
+            SendMessageTimeout(HwndBroadcast, WmSettingChange, 0, "Environment", SmtoAbortIfHung, 5000, out _);
+            Console.WriteLine($"Added {folder} to your PATH; terminals started from now on can run 'authbridge'");
+        }
+        return StartAsync();
     }
 
     private static async Task<int> InstallRemoteAsync(string name, string[] ssh)
@@ -207,4 +225,11 @@ internal static partial class HostCommands
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetHandleInformation(nint handle, uint mask, uint flags);
+
+    private const nint HwndBroadcast = 0xFFFF;
+    private const uint WmSettingChange = 0x001A;
+    private const uint SmtoAbortIfHung = 0x0002;
+
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageTimeoutW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint SendMessageTimeout(nint window, uint message, nint wParam, string lParam, uint flags, uint timeout, out nint result);
 }

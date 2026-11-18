@@ -40,10 +40,10 @@ Do step 2 once, and the other steps for each machine.
    to set up key-based SSH access.
 2. If %LOCALAPPDATA%\Programs\AuthBridge\authbridge.exe exists, run `.\authbridge stop` in that folder. Download
    https://github.com/VasiliyNovikov/AuthBridge/releases/latest/download/authbridge-win-x64.zip
-   (authbridge-win-arm64.zip on ARM64 Windows) and extract it there with `Expand-Archive -Force`.
+   (authbridge-win-arm64.zip on ARM64 Windows), extract it there with `Expand-Archive -Force`, and run
+   `.\authbridge install` in that folder.
 3. In that folder, run `.\authbridge install-remote <name> <the ssh arguments>`, where <name> is this machine's name
-   in %USERPROFILE%\.authbridge\config.json if it is already there, or else a new short name. Then run
-   `.\authbridge install-startup`.
+   in %USERPROFILE%\.authbridge\config.json if it is already there, or else a new short name.
 4. On Linux, run `~/.local/bin/authbridge --setup-gcm`; it only changes Git Credential Manager helpers, if any.
    If ~/.nuget/plugins/netcore/CredentialProvider.Microsoft exists, also run `~/.local/bin/authbridge --setup-nuget`
    (NuGet then needs ~/.local/bin on PATH, which Ubuntu's default ~/.profile provides).
@@ -62,16 +62,16 @@ Do step 2 once, and the other steps for each machine.
    cd $env:LOCALAPPDATA\Programs\AuthBridge
    ```
 
-2. Connect a Linux machine (`devbox` is a name of your choice; the remaining arguments go to `ssh`), and let the
-   helper start at logon:
+2. Start the helper (now and at logon) and add `authbridge` to your `PATH`, then connect a Linux machine (`devbox` is
+   a name of your choice; the remaining arguments go to `ssh`):
 
    ```powershell
+   .\authbridge install
    .\authbridge install-remote devbox -p 2222 user@devbox.example.com
-   .\authbridge install-startup
    ```
 
-   This copies the client to `~/.local/bin/authbridge`, exports `BROWSER` in `~/.profile` and `~/.bashrc`, and
-   starts the helper. Repeat it for more machines.
+   `install-remote` copies the client to `~/.local/bin/authbridge` and exports `BROWSER` in `~/.profile` and
+   `~/.bashrc`. Repeat it for more machines.
 
 3. Open a new SSH session on the Linux machine. Browser sign-ins now open in your Windows browser.
 
@@ -86,8 +86,8 @@ Optional integrations, run on the Linux machine:
 
 | Windows | |
 | --- | --- |
+| `authbridge install` | Start the helper now and at logon, and add `authbridge` to your `PATH`. |
 | `authbridge install-remote NAME [SSH OPTIONS...] DESTINATION` | Install the client on a Linux machine and keep a tunnel to it. |
-| `authbridge install-startup` | Start the helper at logon. |
 | `authbridge start`, `stop`, `status` | Control the background helper; `serve` runs it in the foreground. |
 
 | Linux | |
