@@ -35,9 +35,8 @@ how you reach your Linux machines:
 Set up AuthBridge (https://github.com/VasiliyNovikov/AuthBridge) so that browser sign-ins on my Linux machines open
 in my Windows browser. I reach each Linux machine with these ssh arguments, one machine per line:
 <OPTIONS AND DESTINATION, e.g. -p 2222 user@devbox>
-If they are still a placeholder, ask me for them. Run Linux commands below as
-ssh -o BatchMode=yes <the ssh arguments> '<command>', keeping the quotes so PowerShell does not expand ~, and run
-.\authbridge commands in %LOCALAPPDATA%\Programs\AuthBridge. Do step 2 once, and the other steps for each machine.
+If they are still a placeholder, ask me for them. Run .\authbridge commands in %LOCALAPPDATA%\Programs\AuthBridge.
+Do step 2 once, and the other steps for each machine.
 
 1. If `ssh -G <the ssh arguments>` prints a remotecommand line, add `-o RemoteCommand=none` to the ssh arguments.
    Then check that `ssh -o BatchMode=yes <the ssh arguments> true` succeeds; if it does not, stop and explain how
@@ -47,11 +46,11 @@ ssh -o BatchMode=yes <the ssh arguments> '<command>', keeping the quotes so Powe
    irm https://raw.githubusercontent.com/VasiliyNovikov/AuthBridge/main/install.ps1 | iex
 3. Run `.\authbridge install-remote <name> <the ssh arguments>`, where <name> is this machine's name in
    %USERPROFILE%\.authbridge\config.json if it is already there, or else a new short name.
-4. On Linux, run `~/.local/bin/authbridge --setup-gcm`; it only changes Git Credential Manager helpers, if any.
-   If ~/.nuget/plugins/netcore/CredentialProvider.Microsoft exists, also run `~/.local/bin/authbridge --setup-nuget`
+4. Run `.\authbridge remote <name> --setup-gcm`, which only changes Git Credential Manager helpers, if any, and
+   `.\authbridge remote <name> --setup-nuget`, which fails harmlessly without the Azure Artifacts credential provider
    (NuGet then needs ~/.local/bin on PATH, which Ubuntu's default ~/.profile provides).
-5. Confirm that `.\authbridge status` shows the tunnel as connected and that `~/.local/bin/authbridge --status`
-   succeeds on Linux; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session.
+5. Confirm that `.\authbridge status` shows the tunnel as connected and that `.\authbridge remote <name> --status`
+   succeeds; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session.
 ```
 
 ### With PowerShell
@@ -79,7 +78,7 @@ To install without the script, extract `authbridge-win-x64.zip` (`authbridge-win
 [latest release](https://github.com/VasiliyNovikov/AuthBridge/releases/latest) to a folder of your choice, and run
 `.\authbridge install` there.
 
-Optional integrations, run on the Linux machine:
+Optional integrations, run on the Linux machine, or from Windows as `authbridge remote devbox --setup-gcm` and so on:
 
 | Command | Effect |
 | --- | --- |
@@ -92,6 +91,7 @@ Optional integrations, run on the Linux machine:
 | --- | --- |
 | `authbridge install` | Start the helper now and at logon, and add `authbridge` to your `PATH`. |
 | `authbridge install-remote NAME [SSH OPTIONS...] DESTINATION` | Install the client on a Linux machine and keep a tunnel to it. |
+| `authbridge remote NAME ARGS...` | Run the Linux client on that machine, for example `authbridge remote devbox --setup-gcm`. |
 | `authbridge update` | Install the latest release; each Linux machine gets the matching client when its tunnel connects. |
 | `authbridge start`, `stop`, `status` | Control the background helper; `serve` runs it in the foreground. |
 

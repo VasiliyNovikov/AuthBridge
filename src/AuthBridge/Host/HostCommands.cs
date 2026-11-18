@@ -15,6 +15,8 @@ internal static partial class HostCommands
           authbridge install            start the helper now and at logon, and add authbridge to PATH
           authbridge install-remote NAME [SSH OPTIONS...] DESTINATION
                                         install the client on a Linux machine and keep a tunnel to it
+          authbridge remote NAME ARGS...
+                                        run the client on that machine, e.g. remote devbox --setup-gcm
           authbridge update             install the latest release; Linux machines get it when they connect
           authbridge start | stop | status | serve
         """;
@@ -30,6 +32,7 @@ internal static partial class HostCommands
         ["stop"] => StopAsync(),
         ["install"] => InstallAsync(),
         ["install-remote", var name, .. var ssh] when ssh.Length > 0 => InstallRemoteAsync(name, ssh),
+        ["remote", var name, .. var arguments] when arguments.Length > 0 => RemoteAsync(name, arguments),
         ["update"] => UpdateAsync(),
         _ => Task.FromResult(Program.Fail(Usage)),
     };
@@ -227,6 +230,20 @@ internal static partial class HostCommands
             }
         }
         return Program.Fail("the tunnel is not connected yet; check 'authbridge status'");
+    }
+
+    /// <summary>Runs the client with the given arguments on a configured machine.</summary>
+    private static async Task<int> RemoteAsync(string name, string[] arguments)
+    {
+        var targets = HostConfig.Load().Targets;
+        if (targets.FirstOrDefault(target => target.Name == name) is not { } target)
+            return Program.Fail($"no machine named '{name}'; configured: {string.Join(", ", targets.Select(target => target.Name))}");
+        // Single quotes pass each argument to the remote shell unchanged.
+        var command = string.Join(' ', ["~/.local/bin/authbridge", .. arguments.Select(argument => $"'{argument.Replace("'", "'\\''")}'")]);
+        var (exitCode, output, error) = await Ssh.RunAsync(target.Ssh, command);
+        Console.Write(output);
+        Console.Error.Write(error);
+        return exitCode;
     }
 
     private static async Task<PingResult?> PingAsync()
