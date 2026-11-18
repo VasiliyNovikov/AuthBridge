@@ -75,7 +75,7 @@ Do step 2 once, and the other steps for each machine.
 3. Open a new SSH session on the Linux machine. Browser sign-ins now open in your Windows browser.
 
 To install without the script, extract `authbridge-win-x64.zip` (`authbridge-win-arm64.zip` on ARM64 Windows) from the
-[latest release](https://github.com/VasiliyNovikov/AuthBridge/releases/latest) to a folder of your choice, and run
+[latest release](https://github.com/VasiliyNovikov/AuthBridge/releases/latest) to any folder, and run
 `.\authbridge install` there.
 
 Optional integrations, run on the Linux machine, or from Windows as `authbridge remote devbox --setup-gcm` and so on.
@@ -90,7 +90,7 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 
 | Windows | |
 | --- | --- |
-| `authbridge install` | Start the helper now and at logon, and add `authbridge` to your `PATH`. |
+| `authbridge install` | Install in `%LOCALAPPDATA%\Programs\AuthBridge`, start the helper now and at logon, and add `authbridge` to your `PATH`. |
 | `authbridge install-remote NAME [SSH OPTIONS...] DESTINATION` | Install the client on a Linux machine and keep a tunnel to it. |
 | `authbridge remote NAME ARGS...` | Run the Linux client on that machine, for example `authbridge remote devbox --setup-gcm`. |
 | `authbridge update` | Install the latest release; each Linux machine gets the matching client when its tunnel connects. |

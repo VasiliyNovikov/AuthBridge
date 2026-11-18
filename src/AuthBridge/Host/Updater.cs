@@ -4,11 +4,17 @@ using System.Runtime.InteropServices;
 
 namespace AuthBridge.Host;
 
-/// <summary>Release versions, and updates of this installation from the GitHub releases.</summary>
+/// <summary>Release versions, and the installation for the current user, from packages or the GitHub releases.</summary>
 internal static class Updater
 {
     private const string Releases = "https://github.com/VasiliyNovikov/AuthBridge/releases";
     private const string ReplacedSuffix = ".authbridge-old";
+
+    /// <summary>The files of a Windows package, as release.cs creates it.</summary>
+    private static readonly string[] PackageFiles = ["authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE"];
+
+    public static string InstallDir { get; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "AuthBridge");
 
     /// <summary>This program's version, such as 1.2.3, without build metadata.</summary>
     public static string Current { get; } =
@@ -36,25 +42,29 @@ internal static class Updater
         return await http.GetByteArrayAsync($"{Releases}/download/v{version}/authbridge-win-{architecture}.zip");
     }
 
-    /// <summary>Extracts a Windows package over this installation.</summary>
+    /// <summary>Installs a release package downloaded from GitHub.</summary>
     public static void Install(byte[] package)
     {
         using var archive = new ZipArchive(new MemoryStream(package));
         foreach (var entry in archive.Entries)
-        {
-            var path = Path.Combine(AppContext.BaseDirectory, Path.GetFileName(entry.FullName));
-            // Files in use, such as this program, cannot be replaced or deleted, but they can be renamed.
-            if (File.Exists(path))
-                File.Move(path, $"{path}.{Environment.ProcessId}{ReplacedSuffix}");
-            entry.ExtractToFile(path);
-        }
+            Replace(Path.GetFileName(entry.FullName), entry.ExtractToFile);
+        DeleteReplacedFiles();
+    }
+
+    /// <summary>Installs the package in a folder, such as the one this program runs from.</summary>
+    public static void InstallFrom(string folder)
+    {
+        foreach (var name in PackageFiles.Where(name => File.Exists(Path.Combine(folder, name))))
+            Replace(name, path => File.Copy(Path.Combine(folder, name), path));
         DeleteReplacedFiles();
     }
 
     /// <summary>Deletes the files that updates replaced, except those still in use.</summary>
     public static void DeleteReplacedFiles()
     {
-        foreach (var file in Directory.EnumerateFiles(AppContext.BaseDirectory, $"*{ReplacedSuffix}"))
+        if (!Directory.Exists(InstallDir))
+            return;
+        foreach (var file in Directory.EnumerateFiles(InstallDir, $"*{ReplacedSuffix}"))
         {
             try
             {
@@ -65,6 +75,20 @@ internal static class Updater
                 // Still in use; the helper tries again when it starts.
             }
         }
+    }
+
+    /// <summary>Writes a file of the installation. A file in use, such as this program, cannot be overwritten or
+    /// deleted, but it can be renamed; so the new file is written beside it and swapped in, which also works when the
+    /// source is the installation itself.</summary>
+    private static void Replace(string name, Action<string> write)
+    {
+        Directory.CreateDirectory(InstallDir);
+        var path = Path.Combine(InstallDir, name);
+        var fresh = $"{path}.{Environment.ProcessId}.new";
+        write(fresh);
+        if (File.Exists(path))
+            File.Move(path, $"{path}.{Environment.ProcessId}{ReplacedSuffix}");
+        File.Move(fresh, path);
     }
 
     private static Version Numbers(string version) => Version.TryParse(version.Split('-', '+')[0], out var numbers) ? numbers : new();

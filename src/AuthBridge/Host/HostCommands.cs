@@ -12,7 +12,7 @@ internal static partial class HostCommands
 {
     private const string Usage = """
         Usage (Windows):
-          authbridge install            start the helper now and at logon, and add authbridge to PATH
+          authbridge install            install for this user, start the helper now and at logon, and add it to PATH
           authbridge install-remote NAME [SSH OPTIONS...] DESTINATION
                                         install the client on a Linux machine and keep a tunnel to it
           authbridge remote NAME ARGS...
@@ -22,13 +22,13 @@ internal static partial class HostCommands
         """;
 
     /// <summary>The same program built as a GUI app, which runs the helper without a console window.</summary>
-    private static string Windowless => Path.Combine(AppContext.BaseDirectory, "authbridgew.exe");
+    private const string Windowless = "authbridgew.exe";
 
     public static Task<int> RunAsync(string[] args) => args switch
     {
         [] or ["status"] => StatusAsync(),
         ["serve"] => ServeAsync(),
-        ["start"] => StartAsync(),
+        ["start"] => StartAsync(AppContext.BaseDirectory),
         ["stop"] => StopAsync(),
         ["install"] => InstallAsync(),
         ["install-remote", var name, .. var ssh] when ssh.Length > 0 => InstallRemoteAsync(name, ssh),
@@ -93,7 +93,8 @@ internal static partial class HostCommands
         Process.Start(info)?.Dispose();
     }
 
-    private static async Task<int> StartAsync()
+    /// <summary>Starts the helper in a folder, unless one is running.</summary>
+    private static async Task<int> StartAsync(string folder)
     {
         if (await PingAsync() is { } running)
         {
@@ -105,7 +106,8 @@ internal static partial class HostCommands
         foreach (var standardHandle in StandardHandles)
             SetHandleInformation(GetStdHandle(standardHandle), HandleFlagInherit, 0);
         // Redirected streams detach the helper from this console.
-        var helper = Processes.StartInfo(File.Exists(Windowless) ? Windowless : Environment.ProcessPath!, ["serve"]);
+        var windowless = Path.Combine(folder, Windowless);
+        var helper = Processes.StartInfo(File.Exists(windowless) ? windowless : Path.Combine(folder, "authbridge.exe"), ["serve"]);
         helper.WorkingDirectory = Paths.StateDir;
         Process.Start(helper)?.Dispose();
         for (var attempt = 0; attempt < 50; attempt++)
@@ -163,8 +165,8 @@ internal static partial class HostCommands
         var package = await Updater.DownloadAsync(latest);
         await StopAsync();
         Updater.Install(package);
-        Console.WriteLine($"updated {Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory)} from {Updater.Current} to {latest}");
-        if (await StartAsync() != 0)
+        Console.WriteLine($"updated {Updater.InstallDir} from {Updater.Current} to {latest}");
+        if (await StartAsync(Updater.InstallDir) != 0)
             return 1;
         PingResult? info = null;
         for (var attempt = 0; attempt < 45; attempt++)
@@ -180,15 +182,25 @@ internal static partial class HostCommands
         return 0;
     }
 
-    /// <summary>Starts the helper now and at logon, and adds this folder to the user PATH.</summary>
-    private static Task<int> InstallAsync()
+    /// <summary>Installs this package for the current user unless it runs from the installation, starts the helper now
+    /// and at logon, and adds the installation to the user PATH.</summary>
+    private static async Task<int> InstallAsync()
     {
-        var command = File.Exists(Windowless) ? $"\"{Windowless}\" serve" : $"\"{Environment.ProcessPath}\" start";
+        var folder = Updater.InstallDir;
+        if (!string.Equals(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), folder, StringComparison.OrdinalIgnoreCase))
+        {
+            // A running helper restarts with the new version.
+            if (await PingAsync() is not null)
+                await StopAsync();
+            Updater.InstallFrom(AppContext.BaseDirectory);
+            Console.WriteLine($"installed authbridge {Updater.Current} in {folder}");
+        }
+        var windowless = Path.Combine(folder, Windowless);
+        var command = File.Exists(windowless) ? $"\"{windowless}\" serve" : $"\"{Path.Combine(folder, "authbridge.exe")}\" start";
         using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
             run.SetValue("authbridge", command);
         Console.WriteLine($"The helper starts at logon: {command}");
 
-        var folder = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
         using var environment = Registry.CurrentUser.CreateSubKey("Environment");
         // Unexpanded, so that entries such as %USERPROFILE%\bin keep working.
         var path = environment.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
@@ -204,7 +216,7 @@ internal static partial class HostCommands
             SendMessageTimeout(HwndBroadcast, WmSettingChange, 0, "Environment", SmtoAbortIfHung, 5000, out _);
             Console.WriteLine($"Added {folder} to your PATH; terminals started from now on can run 'authbridge'");
         }
-        return StartAsync();
+        return await StartAsync(folder);
     }
 
     private static async Task<int> InstallRemoteAsync(string name, string[] ssh)
@@ -217,7 +229,7 @@ internal static partial class HostCommands
         var config = HostConfig.Load();
         (config with { Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/.authbridge")] }).Save();
         Console.WriteLine($"tunnel '{name}' saved to {HostConfig.FilePath}");
-        if (await StartAsync() != 0)
+        if (await StartAsync(AppContext.BaseDirectory) != 0)
             return 1;
         for (var attempt = 0; attempt < 15; attempt++)
         {

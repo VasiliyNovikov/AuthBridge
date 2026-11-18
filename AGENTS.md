@@ -53,8 +53,8 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon, which draws the
   status dot onto its pixels. Keep its images below 256 pixels as uncompressed 32-bit bitmaps.
 - Windows cannot overwrite or delete a running or memory-mapped executable, even shortly after its process exits, but
-  it can rename one. `Updater.Install` therefore renames each replaced file to `*.authbridge-old`, and the helper
-  deletes those when it starts.
+  it can rename one. `Updater` therefore writes each new file beside the old one, renames the old one to
+  `*.authbridge-old`, and moves the new one into place; the helper deletes the old files when it starts.
 - Microsoft Defender attack surface reduction rules on managed devices can block Windows PowerShell 5.1 from starting
   an executable that it has just downloaded or extracted ("Access is denied"); PowerShell 7 was not blocked in
   testing. The docs therefore recommend PowerShell 7 for `install.ps1`.
