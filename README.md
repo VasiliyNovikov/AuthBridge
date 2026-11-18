@@ -55,15 +55,16 @@ Do step 2 once, and the other steps for each machine.
 
 ### With PowerShell
 
-1. Install AuthBridge in `%LOCALAPPDATA%\Programs\AuthBridge`, add `authbridge` to your `PATH`, and start the helper
-   now and at logon. Use PowerShell 7 (`pwsh`) if you have it: on managed devices, Microsoft Defender can block
-   Windows PowerShell 5.1 from starting programs that it has just downloaded.
+1. Download the latest release and run its `authbridge install`, which installs it in
+   `%LOCALAPPDATA%\Programs\AuthBridge`, adds it to your `PATH`, and starts the helper now and at logon. Use PowerShell 7
+   (`pwsh`) if you have it: on managed devices, Microsoft Defender can block Windows PowerShell 5.1 from starting
+   programs that it has just downloaded.
 
    ```powershell
    irm https://raw.githubusercontent.com/VasiliyNovikov/AuthBridge/main/install.ps1 | iex
    ```
 
-2. Connect a Linux machine (`devbox` is a name of your choice; the remaining arguments go to `ssh`):
+2. In a new terminal, connect a Linux machine (`devbox` is a name of your choice; the remaining arguments go to `ssh`):
 
    ```powershell
    authbridge install-remote devbox -p 2222 user@devbox.example.com

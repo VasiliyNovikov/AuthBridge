@@ -27,7 +27,8 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - `src/AuthBridge/Common/`: minimal HTTP/1.1 server and messages, control API protocol and client, OAuth URL helpers,
   logging and paths.
 - `tests/AuthBridge.Tests/`: a few focused tests, including an in-process relay round trip (`RelayTests`).
-- `install.ps1`: the installer behind `irm ... | iex`; it must also run in Windows PowerShell 5.1.
+- `install.ps1`: the installer behind `irm ... | iex`. It only downloads the latest release and runs its
+  `authbridge install`, and it must also run in Windows PowerShell 5.1.
 
 ## Conventions
 
