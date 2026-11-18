@@ -26,6 +26,8 @@ internal static class Setup
                 File.WriteAllText(path, updated);
             Console.WriteLine($"{path}: {(updated == content ? "already configured" : "configured")}");
         }
+        // A program cannot change the environment of the shell that runs it.
+        Console.WriteLine($"New shells get BROWSER; in shells that are already open, run: export BROWSER=\"{Self}\"");
         return 0;
     }
 

@@ -50,7 +50,8 @@ Do step 2 once, and the other steps for each machine.
    Artifacts credential provider if they are installed (NuGet then needs ~/.local/bin on PATH, which Ubuntu's default
    ~/.profile provides).
 5. Confirm that `.\authbridge status` shows the tunnel as connected and that `.\authbridge remote <name> --status`
-   succeeds; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session.
+   succeeds; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session, or to run
+   `export BROWSER=~/.local/bin/authbridge` in sessions that are already open.
 ```
 
 ### With PowerShell
@@ -73,7 +74,8 @@ Do step 2 once, and the other steps for each machine.
    `install-remote` copies the client to `~/.local/bin/authbridge` and exports `BROWSER` in `~/.profile` and
    `~/.bashrc`. Repeat it for more machines.
 
-3. Open a new SSH session on the Linux machine. Browser sign-ins now open in your Windows browser.
+3. Open a new SSH session on the Linux machine, or run `export BROWSER=~/.local/bin/authbridge` in one that is already
+   open. Browser sign-ins now open in your Windows browser.
 
 To install without the script, extract `authbridge-win-x64.zip` (`authbridge-win-arm64.zip` on ARM64 Windows) from the
 [latest release](https://github.com/VasiliyNovikov/AuthBridge/releases/latest) to any folder, and run
