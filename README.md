@@ -108,11 +108,6 @@ Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`.
 - When several Windows machines connect to one Linux machine, URLs open on the most recently connected one.
 - The control API listens on `127.0.0.1` only, and requires a custom header that web pages cannot send.
 
-## Build
+## Development
 
-With the .NET 11 SDK:
-
-```shell
-dotnet test
-./publish.ps1 -Version 1.0.0   # self-contained, single-file binaries and packages in ./artifacts
-```
+See [AGENTS.md](AGENTS.md) for building, testing and the code layout.
