@@ -1,13 +1,14 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using Microsoft.Win32;
 using AuthBridge.Common;
+using Microsoft.Win32;
 
 namespace AuthBridge.Host;
 
 [SupportedOSPlatform("windows")]
-internal static class HostCommands
+internal static partial class HostCommands
 {
     private const string Usage = """
         Usage (Windows):
@@ -91,6 +92,9 @@ internal static class HostCommands
             return 0;
         }
         Paths.EnsureStateDir();
+        // Windows children inherit all inheritable handles; the helper must not keep the caller's output pipes open.
+        foreach (var standardHandle in StandardHandles)
+            SetHandleInformation(GetStdHandle(standardHandle), HandleFlagInherit, 0);
         // Redirected streams detach the helper from this console.
         var helper = Processes.StartInfo(File.Exists(Windowless) ? Windowless : Environment.ProcessPath!, ["serve"]);
         helper.WorkingDirectory = Paths.StateDir;
@@ -192,4 +196,15 @@ internal static class HostCommands
             return null;
         }
     }
+
+    // GetStdHandle identifiers of standard input, output and error.
+    private static readonly int[] StandardHandles = [-10, -11, -12];
+    private const uint HandleFlagInherit = 1;
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint GetStdHandle(int standardHandle);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetHandleInformation(nint handle, uint mask, uint flags);
 }
