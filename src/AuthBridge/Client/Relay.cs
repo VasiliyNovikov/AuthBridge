@@ -20,11 +20,15 @@ internal static class Relay
     })
     { Timeout = TimeSpan.FromMinutes(1) };
 
-    /// <summary>Relays until the application stops listening on <paramref name="port"/> or the helper ends the session.</summary>
-    public static async Task RunAsync(ControlClient bridge, string session, int port, CancellationToken cancel)
+    /// <summary>
+    /// Relays until the application stops listening on <paramref name="port"/> or the helper ends the session.
+    /// <paramref name="reconnect"/> finds the helper again when its tunnel reconnected and the bridge stopped working.
+    /// </summary>
+    public static async Task RunAsync(ControlClient bridge, string session, int port, CancellationToken cancel, Func<Task<ControlClient?>>? reconnect = null)
     {
         var name = $"session {session[..8]}";
         Log.Info($"{name}: relaying to localhost:{port}");
+        var current = bridge;
         var elapsed = Stopwatch.StartNew();
         var listened = false;
         var failures = 0;
@@ -43,7 +47,7 @@ internal static class Relay
                 (bool Closed, PendingRequest? Request) next;
                 try
                 {
-                    next = await bridge.NextAsync(session, PollSeconds, cancel);
+                    next = await current.NextAsync(session, PollSeconds, cancel);
                     failures = 0;
                 }
                 catch (Exception e) when (e is HttpRequestException || e is OperationCanceledException && !cancel.IsCancellationRequested)
@@ -52,6 +56,12 @@ internal static class Relay
                     if (++failures >= 15)
                         return;
                     await Task.Delay(TimeSpan.FromSeconds(2), cancel);
+                    if (reconnect is not null && await reconnect() is { } reconnected)
+                    {
+                        if (current != bridge)
+                            current.Dispose();
+                        current = reconnected;
+                    }
                     continue;
                 }
                 if (next.Closed)
@@ -60,7 +70,7 @@ internal static class Relay
                     return;
                 }
                 if (next.Request is { } pending)
-                    await bridge.ReplyAsync(session, pending.Id, await ForwardAsync(port, pending.Request, cancel), cancel);
+                    await current.ReplyAsync(session, pending.Id, await ForwardAsync(port, pending.Request, cancel), cancel);
             }
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
@@ -70,12 +80,14 @@ internal static class Relay
         {
             try
             {
-                await bridge.CloseAsync(session);
+                await current.CloseAsync(session);
             }
             catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
             {
                 // The helper closes idle sessions itself.
             }
+            if (current != bridge)
+                current.Dispose();
         }
     }
 

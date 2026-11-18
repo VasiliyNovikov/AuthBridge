@@ -96,7 +96,8 @@ internal static class ClientCommands
         Posix.Detach();
         Log.Init("client.log");
         using var bridge = ControlClient.ForSocket(socket);
-        await Relay.RunAsync(bridge, session, port, CancellationToken.None);
+        // A reconnected tunnel listens on a new socket, while the helper keeps the session for a while.
+        await Relay.RunAsync(bridge, session, port, CancellationToken.None, () => Bridge.FindAsync(TimeSpan.FromSeconds(5)));
         return 0;
     }
 

@@ -11,18 +11,23 @@ namespace AuthBridge.Tests;
 public sealed class RelayTests
 {
     [TestMethod]
-    public async Task RelaysTheBrowserRedirectToTheApplication()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RelaysTheBrowserRedirectToTheApplication(bool tunnelReconnects)
     {
         await using var application = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(new HttpResponse(200,
             [new("Set-Cookie", "a=1"), new("Set-Cookie", "b=2")],
             Encoding.UTF8.GetBytes($"{request.Method} {request.Target} {Encoding.UTF8.GetString(request.Body)}"))));
         await using var helper = StartHelper();
         using var bridge = ControlClient.ForPort(helper.Port);
+        // A dropped tunnel: nothing listens there any more, and the relay must find the helper again.
+        using var dropped = ControlClient.ForPort(FreePort());
         var relayPort = FreePort();
 
         var (status, session, _) = await bridge.OpenAsync(Open(relayPort));
         using var stop = new CancellationTokenSource();
-        var relay = Relay.RunAsync(bridge, session!, application.Port, stop.Token);
+        var relay = Relay.RunAsync(tunnelReconnects ? dropped : bridge, session!, application.Port, stop.Token,
+            () => Task.FromResult<ControlClient?>(ControlClient.ForPort(helper.Port)));
         using var browser = new HttpClient();
         using var response = await browser.PostAsync($"http://localhost:{relayPort}/callback?x=1", new StringContent("code=c&state=s"));
 

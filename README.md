@@ -102,6 +102,9 @@ Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`.
 
 - To upgrade, run `authbridge stop`, extract the new package over the old one, and run `install-remote` again for each
   machine.
+- Dropped SSH connections, for example while a VPN or tunnel service is down, reconnect by themselves: the helper
+  retries at least once a minute for as long as needed. Sign-ins in progress continue over the new connection; sign-ins
+  started while disconnected fail at once.
 - Windows reserves some port ranges, for example for Hyper-V. If an application picked such a port, its sign-in
   fails at once and succeeds on retry.
 - For SSH hosts with a `RemoteCommand` in `~/.ssh/config`, add `-o RemoteCommand=none` to `install-remote`.

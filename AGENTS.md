@@ -44,6 +44,8 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   started at logon has no console window.
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
+- Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds the helper again through the
+  reconnect callback of `Relay.RunAsync`; the helper keeps the session meanwhile.
 - When the helper cannot relay a redirect (not connected, or HTTP 409 because Windows reserves the port), the client
   sends the waiting application an OAuth error (`OAuth.CancelRequest`) so that it fails at once.
 - `--gcm` and `--nuget-plugin` replace the process via `execvpe`. Git Credential Manager and MSAL.NET offer browser
