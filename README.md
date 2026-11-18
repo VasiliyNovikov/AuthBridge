@@ -22,12 +22,41 @@ where you are already signed in, and relays the redirect back to the Linux machi
 Requirements: Windows with the OpenSSH client, and key-based SSH access to the Linux machine
 (`ssh -o BatchMode=yes <host> true` must succeed). Linux machines can be x64 or arm64.
 
-1. Download `authbridge-win-x64.zip` (or `-win-arm64`) from
-   [Releases](https://github.com/VasiliyNovikov/AuthBridge/releases) and extract it:
+### With an AI agent
+
+Copy this prompt into a coding agent running on your Windows machine (for example GitHub Copilot CLI), and fill in
+how you reach the Linux machine:
+
+```text
+Set up AuthBridge (https://github.com/VasiliyNovikov/AuthBridge) so that browser sign-ins on my Linux machine open
+in my Windows browser. I reach the Linux machine with: ssh <OPTIONS AND DESTINATION, e.g. -p 2222 user@devbox>
+If those ssh arguments are still a placeholder, ask me for them. Run Linux commands below as
+ssh -o BatchMode=yes <the ssh arguments> '<command>', keeping the quotes so PowerShell does not expand ~.
+
+1. If `ssh -G <the ssh arguments>` prints a remotecommand line, add `-o RemoteCommand=none` to the ssh arguments.
+   Then check that `ssh -o BatchMode=yes <the ssh arguments> true` succeeds; if it does not, stop and explain how
+   to set up key-based SSH access.
+2. If %LOCALAPPDATA%\Programs\AuthBridge\authbridge.exe exists, run `.\authbridge stop` in that folder. Download
+   https://github.com/VasiliyNovikov/AuthBridge/releases/latest/download/authbridge-win-x64.zip
+   (authbridge-win-arm64.zip on ARM64 Windows) and extract it there with `Expand-Archive -Force`.
+3. In that folder, run `.\authbridge install-remote <name> <the ssh arguments>`, where <name> is this machine's name
+   in %USERPROFILE%\.authbridge\config.json if it is already there, or else a new short name. Then run
+   `.\authbridge install-startup`.
+4. On Linux, run `~/.local/bin/authbridge --setup-gcm`; it only changes Git Credential Manager helpers, if any.
+   If ~/.nuget/plugins/netcore/CredentialProvider.Microsoft exists, also run `~/.local/bin/authbridge --setup-nuget`
+   (NuGet then needs ~/.local/bin on PATH, which Ubuntu's default ~/.profile provides).
+5. Confirm that `.\authbridge status` shows the tunnel as connected and that `~/.local/bin/authbridge --status`
+   succeeds on Linux; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session.
+```
+
+### Manually
+
+1. Download and extract the package (`authbridge-win-arm64.zip` on ARM64 Windows):
 
    ```powershell
-   Unblock-File authbridge-win-x64.zip
-   Expand-Archive authbridge-win-x64.zip $env:LOCALAPPDATA\Programs\AuthBridge
+   $zip = "$env:TEMP\authbridge.zip"
+   Invoke-WebRequest https://github.com/VasiliyNovikov/AuthBridge/releases/latest/download/authbridge-win-x64.zip -OutFile $zip
+   Expand-Archive $zip $env:LOCALAPPDATA\Programs\AuthBridge -Force
    cd $env:LOCALAPPDATA\Programs\AuthBridge
    ```
 
@@ -71,6 +100,8 @@ Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`.
 
 ## Notes
 
+- To upgrade, run `authbridge stop`, extract the new package over the old one, and run `install-remote` again for each
+  machine.
 - Windows reserves some port ranges, for example for Hyper-V. If an application picked such a port, its sign-in
   fails at once and succeeds on retry.
 - For SSH hosts with a `RemoteCommand` in `~/.ssh/config`, add `-o RemoteCommand=none` to `install-remote`.
