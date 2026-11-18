@@ -22,7 +22,8 @@ internal sealed record ErrorResult(string Error);
 
 internal sealed record PingResult(int Version, int Pid, int Sessions, TunnelStatus[] Tunnels);
 
-internal sealed record TunnelStatus(string Name, string State, string Detail, DateTimeOffset Since);
+/// <summary>A tunnel's state; <c>Client</c> is the remote client's version once the helper has checked it.</summary>
+internal sealed record TunnelStatus(string Name, string State, string Detail, DateTimeOffset Since, string Client = "");
 
 /// <summary>A browser request waiting in a relay session for the remote client's answer.</summary>
 internal sealed record PendingRequest(string Id, HttpRequest Request);

@@ -18,7 +18,9 @@ internal static class Ssh
 internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 {
     private readonly CancellationTokenSource _stopping = new();
+    private readonly Lock _gate = new();
     private Process? _ssh;
+    private bool _clientChecked;
 
     public TunnelStatus Status { get; private set; } = new(target.Name, "starting", "", DateTimeOffset.Now);
 
@@ -58,7 +60,11 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
                 var stderr = ssh.StandardError.ReadToEndAsync();
                 var exited = ssh.WaitForExitAsync();
                 if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(5))) != exited)
+                {
                     SetStatus("connected");
+                    if (!_clientChecked)
+                        _ = UpdateClientAsync();
+                }
                 await exited;
                 errors = await stderr;
             }
@@ -87,10 +93,39 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 
     private void SetStatus(string state, string detail = "")
     {
-        if (state == Status.State && detail == Status.Detail)
-            return;
-        Status = new(target.Name, state, detail, DateTimeOffset.Now);
+        lock (_gate)
+        {
+            if (state == Status.State && detail == Status.Detail)
+                return;
+            Status = Status with { State = state, Detail = detail, Since = DateTimeOffset.Now };
+        }
         Log.Info($"tunnel {target.Name}: {state}{(detail.Length > 0 ? $" ({detail})" : "")}");
+    }
+
+    /// <summary>Replaces an older client on the remote machine with the one that matches this helper; it never
+    /// downgrades, so that helpers of different versions do not undo each other's updates.</summary>
+    private async Task UpdateClientAsync()
+    {
+        string client;
+        try
+        {
+            var machine = await RemoteClient.ProbeAsync(target.Ssh);
+            client = machine.Version ?? "not installed";
+            if (machine.Version is { } version && Updater.IsNewer(Updater.Current, version))
+            {
+                await RemoteClient.UploadAsync(target.Ssh, machine.Architecture);
+                Log.Info($"tunnel {target.Name}: updated the client from {version} to {Updater.Current}");
+                client = Updater.Current;
+            }
+            _clientChecked = true;
+        }
+        catch (Exception e)
+        {
+            Log.Warn($"tunnel {target.Name}: cannot check the client: {e.Message}");
+            client = "unknown";
+        }
+        lock (_gate)
+            Status = Status with { Client = client };
     }
 }
 

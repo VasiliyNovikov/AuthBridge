@@ -15,6 +15,7 @@ internal static partial class HostCommands
           authbridge install            start the helper now and at logon, and add authbridge to PATH
           authbridge install-remote NAME [SSH OPTIONS...] DESTINATION
                                         install the client on a Linux machine and keep a tunnel to it
+          authbridge update             install the latest release; Linux machines get it when they connect
           authbridge start | stop | status | serve
         """;
 
@@ -29,6 +30,7 @@ internal static partial class HostCommands
         ["stop"] => StopAsync(),
         ["install"] => InstallAsync(),
         ["install-remote", var name, .. var ssh] when ssh.Length > 0 => InstallRemoteAsync(name, ssh),
+        ["update"] => UpdateAsync(),
         _ => Task.FromResult(Program.Fail(Usage)),
     };
 
@@ -45,6 +47,7 @@ internal static partial class HostCommands
             Log.Info($"127.0.0.1:{Protocol.ControlPort} is unavailable ({e.Message}); another helper is probably running");
             return 1;
         }
+        Updater.DeleteReplacedFiles();
         using var tunnels = new TunnelSet(Protocol.ControlPort);
         helper.Tunnels = tunnels.Statuses;
         // Not disposed, because the tray icon may cancel it at any time.
@@ -137,8 +140,40 @@ internal static partial class HostCommands
         foreach (var tunnel in info.Tunnels)
         {
             var detail = tunnel.Detail.Length > 0 ? $" - {tunnel.Detail}" : "";
-            Console.WriteLine($"  tunnel {tunnel.Name}: {tunnel.State} since {tunnel.Since.LocalDateTime:yyyy-MM-dd HH:mm:ss}{detail}");
+            var client = tunnel.Client.Length > 0 ? $", client {tunnel.Client}" : "";
+            Console.WriteLine($"  tunnel {tunnel.Name}: {tunnel.State} since {tunnel.Since.LocalDateTime:yyyy-MM-dd HH:mm:ss}{client}{detail}");
         }
+        return 0;
+    }
+
+    /// <summary>Installs the latest release over this installation and restarts the helper, which then updates the
+    /// client on each machine when its tunnel connects.</summary>
+    private static async Task<int> UpdateAsync()
+    {
+        var latest = await Updater.LatestAsync();
+        if (!Updater.IsNewer(latest, Updater.Current))
+        {
+            Console.WriteLine($"authbridge {Updater.Current} is up to date");
+            return 0;
+        }
+        Console.WriteLine($"downloading authbridge {latest}");
+        var package = await Updater.DownloadAsync(latest);
+        await StopAsync();
+        Updater.Install(package);
+        Console.WriteLine($"updated {Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory)} from {Updater.Current} to {latest}");
+        if (await StartAsync() != 0)
+            return 1;
+        PingResult? info = null;
+        for (var attempt = 0; attempt < 45; attempt++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            info = await PingAsync();
+            if (info is null || info.Tunnels.All(tunnel => tunnel.State == "connected" ? tunnel.Client.Length > 0 : tunnel.State == "disconnected"))
+                break;
+        }
+        await StatusAsync();
+        if (info?.Tunnels.Any(tunnel => tunnel.State != "connected") == true)
+            Console.WriteLine("Machines that are not connected get the new client when their tunnels connect.");
         return 0;
     }
 
@@ -171,27 +206,13 @@ internal static partial class HostCommands
 
     private static async Task<int> InstallRemoteAsync(string name, string[] ssh)
     {
-        var probe = await Ssh.RunAsync(ssh, "uname -m; printf %s \"$HOME\"");
-        var lines = probe.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (probe.ExitCode != 0 || lines is not [var machine, var home] || !home.StartsWith('/'))
-            return Program.Fail($"cannot query the remote machine: {probe.Error.Trim()}");
-        var architecture = machine switch { "x86_64" => "x64", "aarch64" or "arm64" => "arm64", _ => machine };
-        var client = Path.Combine(AppContext.BaseDirectory, $"authbridge-linux-{architecture}");
-        if (!File.Exists(client))
-            return Program.Fail($"no client for {machine}: {client} is missing");
-
-        await using (var binary = File.OpenRead(client))
-        {
-            var upload = await Ssh.RunAsync(ssh, "mkdir -p ~/.authbridge ~/.local/bin && chmod 700 ~/.authbridge && " +
-                "cat > ~/.local/bin/authbridge.new && chmod 755 ~/.local/bin/authbridge.new && mv -f ~/.local/bin/authbridge.new ~/.local/bin/authbridge", binary);
-            if (upload.ExitCode != 0)
-                return Program.Fail($"upload failed: {upload.Error.Trim()}");
-        }
-        Console.WriteLine($"installed {home}/.local/bin/authbridge");
+        var machine = await RemoteClient.ProbeAsync(ssh);
+        await RemoteClient.UploadAsync(ssh, machine.Architecture);
+        Console.WriteLine($"installed {machine.Home}/.local/bin/authbridge");
         Console.Write((await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --setup-shell")).Output);
 
         var config = HostConfig.Load();
-        (config with { Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{home}/.authbridge")] }).Save();
+        (config with { Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/.authbridge")] }).Save();
         Console.WriteLine($"tunnel '{name}' saved to {HostConfig.FilePath}");
         if (await StartAsync() != 0)
             return 1;

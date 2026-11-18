@@ -19,8 +19,8 @@ run `release.cs` and create a GitHub release with its artifacts.
 One executable, `authbridge`; `Program.cs` runs the Windows or the Linux commands depending on the OS.
 
 - `src/AuthBridge/Host/`: the Windows helper. Control API (`Helper`), relay sessions listening on loopback ports
-  (`RelaySession`), reverse SSH tunnels (`Tunnel`), the notification area icon (`TrayIcon`), and the Windows commands
-  (`HostCommands`).
+  (`RelaySession`), reverse SSH tunnels (`Tunnel`), the notification area icon (`TrayIcon`), the client on remote
+  machines (`RemoteClient`), updates from GitHub releases (`Updater`), and the Windows commands (`HostCommands`).
 - `src/AuthBridge/Client/`: the Linux client. The `BROWSER` entry point and commands (`ClientCommands`), tunnel socket
   discovery (`Bridge`), forwarding of relayed requests to the waiting application (`Relay`), and the shell, Git
   Credential Manager and NuGet setup and wrappers.
@@ -32,8 +32,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 
 - Use only the base class library. Serialize through the source-generated `Json` context in `Common/Protocol.cs`, and
   register new types there.
-- Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version, which
-  `install-remote` ensures by uploading the matching client.
+- Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version. When a tunnel
+  first connects, the helper replaces an older client with the one in its package, and never downgrades one, so that
+  helpers of different versions do not undo each other's updates.
 - Keep tests few and focused; extend the existing test classes.
 - Text files use LF line endings (`.gitattributes`).
 
@@ -50,6 +51,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   before it sets the status.
 - `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon, which draws the
   status dot onto its pixels. Keep its images below 256 pixels as uncompressed 32-bit bitmaps.
+- Windows cannot overwrite or delete a running or memory-mapped executable, even shortly after its process exits, but
+  it can rename one. `Updater.Install` therefore renames each replaced file to `*.authbridge-old`, and the helper
+  deletes those when it starts.
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
 - Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds the helper again through the

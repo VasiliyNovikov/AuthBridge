@@ -92,6 +92,7 @@ Optional integrations, run on the Linux machine:
 | --- | --- |
 | `authbridge install` | Start the helper now and at logon, and add `authbridge` to your `PATH`. |
 | `authbridge install-remote NAME [SSH OPTIONS...] DESTINATION` | Install the client on a Linux machine and keep a tunnel to it. |
+| `authbridge update` | Install the latest release; each Linux machine gets the matching client when its tunnel connects. |
 | `authbridge start`, `stop`, `status` | Control the background helper; `serve` runs it in the foreground. |
 
 | Linux | |
@@ -110,8 +111,10 @@ Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`.
 
 ## Notes
 
-- To upgrade, run `authbridge stop`, extract the new package over the old one, and run `install-remote` again for each
-  machine.
+- To upgrade, run `authbridge update`. The helper replaces older clients on the Linux machines when their tunnels
+  connect, so machines that are offline catch up later; `authbridge status` shows each machine's client version.
+  Versions before 0.1.7 have no `update`: run `authbridge stop`, extract the new package over the old one (retry if a
+  file is still in use), and run `authbridge start`.
 - Dropped SSH connections, for example while a VPN or tunnel service is down, reconnect by themselves: the helper
   retries at least once a minute for as long as needed. Sign-ins in progress continue over the new connection; sign-ins
   started while disconnected fail at once.
