@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet test
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    # Windows, so that the Windows executables get their version resources.
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: ./publish.ps1 -Version ($env:GITHUB_REF_NAME -replace '^v')
+      - run: gh release create $env:GITHUB_REF_NAME (Get-ChildItem artifacts -File).FullName --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
