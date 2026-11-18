@@ -2,6 +2,10 @@
 
 Sign in on remote Linux machines with your local Windows browser.
 
+> [!NOTE]
+> This project is 100% vibe-coded: an AI coding agent wrote all of its code and documentation, directed by a human.
+> Review it before you rely on it.
+
 Command-line tools that sign in through a browser — `az login`, Git Credential Manager, the Azure Artifacts
 credential provider, or anything else that uses an OAuth loopback redirect to `http://localhost:PORT` — cannot
 do it on a headless Linux machine you reach over SSH. AuthBridge opens their URLs in your Windows browser,
