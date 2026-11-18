@@ -51,7 +51,7 @@ Do step 2 once, and the other steps for each machine.
    ~/.profile provides).
 5. Confirm that `.\authbridge status` shows the tunnel as connected and that `.\authbridge remote <name> --status`
    succeeds; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session, or to run
-   `export BROWSER=~/.local/bin/authbridge` in sessions that are already open.
+   `eval "$(~/.local/bin/authbridge --env)"` in sessions that are already open.
 ```
 
 ### With PowerShell
@@ -74,8 +74,8 @@ Do step 2 once, and the other steps for each machine.
    `install-remote` copies the client to `~/.local/bin/authbridge` and exports `BROWSER` in `~/.profile` and
    `~/.bashrc`. Repeat it for more machines.
 
-3. Open a new SSH session on the Linux machine, or run `export BROWSER=~/.local/bin/authbridge` in one that is already
-   open. Browser sign-ins now open in your Windows browser.
+3. Open a new SSH session on the Linux machine, or run `eval "$(~/.local/bin/authbridge --env)"` in one that is
+   already open. Browser sign-ins now open in your Windows browser.
 
 To install without the script, extract `authbridge-win-x64.zip` (`authbridge-win-arm64.zip` on ARM64 Windows) from the
 [latest release](https://github.com/VasiliyNovikov/AuthBridge/releases/latest) to any folder, and run
@@ -103,6 +103,7 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 | --- | --- |
 | `authbridge URL...` | Open URLs in the Windows browser (used through `BROWSER`). |
 | `authbridge --status` | Check the connection to the Windows helper. |
+| `authbridge --env` | Print the command that sets `BROWSER`; `eval "$(authbridge --env)"` sets it in a shell that was already open. |
 | `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget`, `--setup-all` | Configure the shell and integrations. |
 
 On Windows, the dot on the helper's notification area icon is green when all machines are connected, yellow when some

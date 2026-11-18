@@ -12,6 +12,9 @@ internal static class Setup
 
     private static string Self => Environment.ProcessPath!;
 
+    /// <summary>The shell command in the init files; it keeps a BROWSER that is already set.</summary>
+    private static string ExportBrowser => $"export BROWSER=\"${{BROWSER:-{Self}}}\"";
+
     /// <summary>Exports BROWSER in the login and interactive shell init files.</summary>
     [SupportedOSPlatform("linux")]
     public static int Shell()
@@ -21,13 +24,20 @@ internal static class Setup
         foreach (var path in new[] { login, ".bashrc" }.Select(name => Path.Combine(home, name)))
         {
             var content = File.Exists(path) ? File.ReadAllText(path) : "";
-            var updated = WithBlock(content, $"export BROWSER=\"${{BROWSER:-{Self}}}\"");
+            var updated = WithBlock(content, ExportBrowser);
             if (updated != content)
                 File.WriteAllText(path, updated);
             Console.WriteLine($"{path}: {(updated == content ? "already configured" : "configured")}");
         }
-        // A program cannot change the environment of the shell that runs it.
-        Console.WriteLine($"New shells get BROWSER; in shells that are already open, run: export BROWSER=\"{Self}\"");
+        Console.WriteLine($"New shells get BROWSER; in shells that are already open, run: eval \"$({Self} --env)\"");
+        return 0;
+    }
+
+    /// <summary>Prints the shell command in the init files. A program cannot change the environment of the shell that
+    /// runs it, but that shell can run what this prints.</summary>
+    public static int Env()
+    {
+        Console.WriteLine(ExportBrowser);
         return 0;
     }
 

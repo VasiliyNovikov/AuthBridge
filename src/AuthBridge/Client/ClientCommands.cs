@@ -13,12 +13,14 @@ internal static class ClientCommands
         Usage (Linux):
           authbridge URL...       open URLs in the Windows browser (set as $BROWSER)
           authbridge --status     check the connection to the Windows helper
+          authbridge --env        print the command that sets BROWSER: eval "$(authbridge --env)"
           authbridge --setup-shell | --setup-gcm | --setup-nuget | --setup-all
         """;
 
     public static Task<int> RunAsync(string[] args) => args switch
     {
         ["--status"] => StatusAsync(),
+        ["--env"] => Task.FromResult(Setup.Env()),
         ["--setup-shell"] => Task.FromResult(Setup.Shell()),
         ["--setup-gcm"] => Setup.GcmAsync(),
         ["--setup-nuget"] => Task.FromResult(Setup.NuGet()),
