@@ -194,26 +194,41 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         return (tip.Length > 127 ? tip[..124] + "..." : tip, connected == tunnels.Length ? Green : connected > 0 ? Yellow : Gray);
     }
 
-    /// <summary>A dot in the given color, built as an icon resource: a bitmap header, the pixels, and an empty mask.</summary>
+    /// <summary>The application icon with a dot in the given color at its bottom right.</summary>
     private static nint CreateStatusIcon(uint color)
     {
-        var size = GetSystemMetrics(49); // SM_CXSMICON
-        var bits = new uint[10 + (size * size) + ((size + 31) / 32 * size)];
-        bits[0] = 40; // BITMAPINFOHEADER size
-        bits[1] = (uint)size;
-        bits[2] = (uint)size * 2; // the pixels and the mask
-        bits[3] = 1 | (32 << 16); // 1 plane, 32 bits per pixel
-        var center = (size - 1) / 2f;
+        var image = AppIconImage(GetSystemMetrics(49)); // SM_CXSMICON
+        var size = BitConverter.ToInt32(image, 4);
+        var pixels = MemoryMarshal.Cast<byte, uint>(image.AsSpan(40, size * size * 4));
+        float radius = size * 0.19f, center = size - radius, gap = Math.Max(1, size / 16f);
         for (var y = 0; y < size; y++)
         {
             for (var x = 0; x < size; x++)
             {
-                var coverage = Math.Clamp((size * 0.42f) + 0.5f - MathF.Sqrt(((x - center) * (x - center)) + ((y - center) * (y - center))), 0, 1);
-                bits[10 + (y * size) + x] = ((uint)(coverage * 255) << 24) | color;
+                // Rows are bottom-up. The icon is cut away around the dot, which keeps it visible on any background.
+                var distance = MathF.Sqrt(((x + 0.5f - center) * (x + 0.5f - center)) + ((y + 0.5f - radius) * (y + 0.5f - radius)));
+                var dot = Math.Clamp(radius + 0.5f - distance, 0, 1);
+                var keep = Math.Clamp(distance - radius - gap + 0.5f, 0, 1);
+                ref var pixel = ref pixels[(y * size) + x];
+                pixel = dot > 0 ? ((uint)(dot * 255) << 24) | color : ((uint)((pixel >> 24) * keep) << 24) | (pixel & 0xFFFFFF);
             }
         }
-        fixed (uint* resource = bits)
-            return CreateIconFromResourceEx((byte*)resource, (uint)bits.Length * 4, 1, 0x00030000, size, size, 0);
+        fixed (byte* resource = image)
+            return CreateIconFromResourceEx(resource, (uint)image.Length, 1, 0x00030000, size, size, 0);
+    }
+
+    /// <summary>The image in AuthBridge.ico closest to and at least the given size, as an icon resource: a bitmap
+    /// header, 32-bit pixels and a mask.</summary>
+    private static byte[] AppIconImage(int size)
+    {
+        using var stream = typeof(TrayIcon).Assembly.GetManifestResourceStream("AuthBridge.ico")!;
+        var ico = new byte[stream.Length];
+        stream.ReadExactly(ico);
+        // A 6-byte header with the image count at 4, then 16-byte entries with the width at 0 (0 for the 256-pixel PNG),
+        // the image length at 8, and its offset at 12.
+        var entry = Enumerable.Range(0, BitConverter.ToUInt16(ico, 4)).Select(index => 6 + (16 * index)).Where(offset => ico[offset] != 0)
+            .OrderBy(offset => ico[offset] < size).ThenBy(offset => Math.Abs(ico[offset] - size)).First();
+        return ico.AsSpan(BitConverter.ToInt32(ico, entry + 12), BitConverter.ToInt32(ico, entry + 8)).ToArray();
     }
 
     private struct WindowClass

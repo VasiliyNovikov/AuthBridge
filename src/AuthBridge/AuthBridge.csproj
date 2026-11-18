@@ -12,9 +12,12 @@
     <PublishSingleFile>true</PublishSingleFile>
     <PublishTrimmed>true</PublishTrimmed>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <ApplicationIcon>AuthBridge.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The tray icon adds a status dot to its images. -->
+    <EmbeddedResource Include="AuthBridge.ico" LogicalName="AuthBridge.ico" />
     <InternalsVisibleTo Include="AuthBridge.Tests" />
   </ItemGroup>
 

@@ -48,6 +48,8 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   `authbridge stop` does that rather than killing the process, which would leave a stale icon.
 - Windows 11 keeps an icon's first tooltip as its name, so `TrayIcon` adds the icon with the tooltip `AuthBridge`
   before it sets the status.
+- `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon, which draws the
+  status dot onto its pixels. Keep its images below 256 pixels as uncompressed 32-bit bitmaps.
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
 - Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds the helper again through the
