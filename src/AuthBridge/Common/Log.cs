@@ -5,13 +5,14 @@ internal static class Log
 {
     private const long MaxBytes = 1 << 20;
     private static readonly Lock Gate = new();
-    private static string? _path;
     private static bool _echo;
+
+    public static string? FilePath { get; private set; }
 
     public static void Init(string fileName, bool echo = false)
     {
         Paths.EnsureStateDir();
-        _path = Path.Combine(Paths.StateDir, fileName);
+        FilePath = Path.Combine(Paths.StateDir, fileName);
         _echo = echo;
     }
 
@@ -30,11 +31,11 @@ internal static class Log
             {
                 if (_echo)
                     Console.Error.WriteLine(line);
-                if (_path is null)
+                if (FilePath is not { } path)
                     return;
-                if (new FileInfo(_path) is { Exists: true, Length: > MaxBytes })
-                    File.Move(_path, _path + ".1", overwrite: true);
-                File.AppendAllText(_path, line + Environment.NewLine);
+                if (new FileInfo(path) is { Exists: true, Length: > MaxBytes })
+                    File.Move(path, path + ".1", overwrite: true);
+                File.AppendAllText(path, line + Environment.NewLine);
             }
             catch (IOException)
             {

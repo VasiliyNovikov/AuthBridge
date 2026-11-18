@@ -96,6 +96,10 @@ Optional integrations, run on the Linux machine:
 | `authbridge --status` | Check the connection to the Windows helper. |
 | `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget` | Configure the shell and integrations. |
 
+On Windows, the helper's notification area icon is green when all machines are connected, yellow when some are, and
+gray when none are. Hover over it for each machine's state, or right-click it to open the log or exit. Windows 11 may
+first put it among the hidden icons; drag it to the taskbar to keep it in view.
+
 Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`. Tunnels are kept in
 `%USERPROFILE%\.authbridge\config.json`, which also accepts a browser command such as
 `"browserCommand": ["C:\\Program Files\\Mozilla Firefox\\firefox.exe", "{url}"]`.

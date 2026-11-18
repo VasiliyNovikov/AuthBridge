@@ -47,12 +47,14 @@ internal static partial class HostCommands
         }
         using var tunnels = new TunnelSet(Protocol.ControlPort);
         helper.Tunnels = tunnels.Statuses;
-        using var stopping = new CancellationTokenSource();
+        // Not disposed, because the tray icon may cancel it at any time.
+        var stopping = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
             stopping.Cancel();
         };
+        using var tray = TrayIcon.Start(tunnels.Statuses, stopping.Cancel);
         Log.Info($"helper listening on 127.0.0.1:{helper.Port} (pid {Environment.ProcessId})");
 
         var configTime = DateTime.MinValue;
@@ -73,6 +75,7 @@ internal static partial class HostCommands
                 break;
             }
         }
+        Log.Info("helper stopping");
         return 0;
     }
 
@@ -118,7 +121,10 @@ internal static partial class HostCommands
             Console.WriteLine("authbridge helper is not running");
             return 0;
         }
-        Process.GetProcessById(running.Pid).Kill(entireProcessTree: true);
+        using var helper = Process.GetProcessById(running.Pid);
+        // Exiting through its tray icon lets the helper remove the icon and close its tunnels.
+        if (!TrayIcon.RequestExit(running.Pid) || !helper.WaitForExit(TimeSpan.FromSeconds(15)))
+            helper.Kill(entireProcessTree: true);
         Console.WriteLine($"authbridge helper stopped (pid {running.Pid})");
         return 0;
     }

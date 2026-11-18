@@ -19,7 +19,8 @@ run `release.cs` and create a GitHub release with its artifacts.
 One executable, `authbridge`; `Program.cs` runs the Windows or the Linux commands depending on the OS.
 
 - `src/AuthBridge/Host/`: the Windows helper. Control API (`Helper`), relay sessions listening on loopback ports
-  (`RelaySession`), reverse SSH tunnels (`Tunnel`), and the Windows commands (`HostCommands`).
+  (`RelaySession`), reverse SSH tunnels (`Tunnel`), the notification area icon (`TrayIcon`), and the Windows commands
+  (`HostCommands`).
 - `src/AuthBridge/Client/`: the Linux client. The `BROWSER` entry point and commands (`ClientCommands`), tunnel socket
   discovery (`Bridge`), forwarding of relayed requests to the waiting application (`Relay`), and the shell, Git
   Credential Manager and NuGet setup and wrappers.
@@ -42,6 +43,11 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   handles before it starts the helper; otherwise `authbridge start` never finishes when its output is redirected.
 - `release.cs` derives `authbridgew.exe` from `authbridge.exe` by setting the PE subsystem to GUI, so the helper
   started at logon has no console window.
+- `TrayIcon` uses raw Win32 because Windows Forms does not support trimming. Its window is hidden rather than
+  message-only, so that it receives `TaskbarCreated` after Explorer restarts. Closing the window stops the helper;
+  `authbridge stop` does that rather than killing the process, which would leave a stale icon.
+- Windows 11 keeps an icon's first tooltip as its name, so `TrayIcon` adds the icon with the tooltip `AuthBridge`
+  before it sets the status.
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
 - Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds the helper again through the
