@@ -25,13 +25,15 @@ Requirements: Windows with the OpenSSH client, and key-based SSH access to the L
 ### With an AI agent
 
 Copy this prompt into a coding agent running on your Windows machine (for example GitHub Copilot CLI), and fill in
-how you reach the Linux machine:
+how you reach your Linux machines:
 
 ```text
-Set up AuthBridge (https://github.com/VasiliyNovikov/AuthBridge) so that browser sign-ins on my Linux machine open
-in my Windows browser. I reach the Linux machine with: ssh <OPTIONS AND DESTINATION, e.g. -p 2222 user@devbox>
-If those ssh arguments are still a placeholder, ask me for them. Run Linux commands below as
+Set up AuthBridge (https://github.com/VasiliyNovikov/AuthBridge) so that browser sign-ins on my Linux machines open
+in my Windows browser. I reach each Linux machine with these ssh arguments, one machine per line:
+<OPTIONS AND DESTINATION, e.g. -p 2222 user@devbox>
+If they are still a placeholder, ask me for them. Run Linux commands below as
 ssh -o BatchMode=yes <the ssh arguments> '<command>', keeping the quotes so PowerShell does not expand ~.
+Do step 2 once, and the other steps for each machine.
 
 1. If `ssh -G <the ssh arguments>` prints a remotecommand line, add `-o RemoteCommand=none` to the ssh arguments.
    Then check that `ssh -o BatchMode=yes <the ssh arguments> true` succeeds; if it does not, stop and explain how
