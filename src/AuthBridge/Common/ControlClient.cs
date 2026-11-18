@@ -45,9 +45,9 @@ internal sealed class ControlClient : IDisposable
 
     public static ControlClient ForPort(int port) => new($"127.0.0.1:{port}", new IPEndPoint(IPAddress.Loopback, port));
 
-    public async Task<PingResult?> PingAsync(TimeSpan timeout)
+    public async Task<PingResult?> PingAsync(TimeSpan timeout, CancellationToken cancel = default)
     {
-        var (status, body) = await SendAsync(HttpMethod.Get, "v1/ping", null, timeout);
+        var (status, body) = await SendAsync(HttpMethod.Get, "v1/ping", null, timeout, cancel);
         return status == 200 ? JsonSerializer.Deserialize(body, Json.Default.PingResult) : null;
     }
 

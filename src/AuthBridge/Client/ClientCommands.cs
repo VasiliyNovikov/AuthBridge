@@ -35,10 +35,17 @@ internal static class ClientCommands
 
     private static async Task<int> StatusAsync()
     {
-        using var bridge = await Bridge.FindAsync(TimeSpan.FromSeconds(5));
-        if (bridge is null)
+        var connections = await Bridge.FindAllAsync(TimeSpan.FromSeconds(5));
+        if (connections.Count == 0)
             return Program.Fail("authbridge: not connected to the Windows helper");
-        Console.WriteLine($"authbridge: connected to the Windows helper via {bridge.Endpoint}");
+        var role = "sign-ins open on";
+        foreach (var connection in connections)
+        {
+            var idle = connection.Info.IdleSeconds is { } seconds ? $" (idle {TimeSpan.FromSeconds(seconds):c})" : "";
+            Console.WriteLine($"authbridge: {role} {connection.Info.Machine ?? "the Windows helper"}{idle} via {connection.Client.Endpoint}");
+            role = "also connected to";
+            connection.Dispose();
+        }
         return 0;
     }
 
@@ -64,12 +71,12 @@ internal static class ClientCommands
             Console.Error.WriteLine("authbridge: not connected to the Windows helper");
             return Cancel(url, port, "the Windows helper is not connected") ? 0 : Program.Fail($"Open this URL manually:\n  {url}");
         }
-        var (status, session, error) = await bridge.OpenAsync(new OpenRequest(url, port, dryRun, Environment.MachineName));
+        var (status, session, error) = await bridge.Client.OpenAsync(new OpenRequest(url, port, dryRun, Environment.MachineName));
         if (status == 200)
         {
             if (session is not null)
-                Spawn(RelayCommand, bridge.Endpoint, session, port.ToString()!);
-            Console.Error.WriteLine($"authbridge: opened in the Windows browser{(session is null ? "" : $"; relaying http://localhost:{port}")}");
+                Spawn(RelayCommand, bridge.Client.Endpoint, session, port.ToString()!);
+            Console.Error.WriteLine($"authbridge: opened in the browser on {bridge.Info.Machine ?? "Windows"}{(session is null ? "" : $"; relaying http://localhost:{port}")}");
             return 0;
         }
         Console.Error.WriteLine($"authbridge: {error}");
@@ -99,8 +106,19 @@ internal static class ClientCommands
         Posix.Detach();
         Log.Init("client.log");
         using var bridge = ControlClient.ForSocket(socket);
-        // A reconnected tunnel listens on a new socket, while the helper keeps the session for a while.
-        await Relay.RunAsync(bridge, session, port, CancellationToken.None, () => Bridge.FindAsync(TimeSpan.FromSeconds(5)));
+        // A reconnected tunnel listens on a new socket, while the helper keeps the session for a while. The helpers of
+        // other PCs do not know the session.
+        PingResult? owner = null;
+        try
+        {
+            owner = await bridge.PingAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+        {
+            // Then any helper will do.
+        }
+        await Relay.RunAsync(bridge, session, port, CancellationToken.None, async () =>
+            (await Bridge.FindAsync(TimeSpan.FromSeconds(5), info => owner is null || (info.Machine, info.Pid) == (owner.Machine, owner.Pid)))?.Client);
         return 0;
     }
 

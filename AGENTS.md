@@ -63,8 +63,12 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   testing. The docs therefore recommend PowerShell 7 for `install.ps1`.
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
-- Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds the helper again through the
-  reconnect callback of `Relay.RunAsync`; the helper keeps the session meanwhile.
+- Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds its helper again, by machine
+  name and process id, through the reconnect callback of `Relay.RunAsync`; the helper keeps the session meanwhile.
+- With several Windows machines connected to one Linux machine, `Bridge` pings every tunnel socket at once and prefers
+  the helper whose PC had keyboard or mouse input most recently (`GetLastInputInfo`), so that sign-ins open where the
+  user is. The tunnel of a PC that has gone to sleep can accept connections without answering, so once one helper has
+  answered, the others get only a second more.
 - When the helper cannot relay a redirect (not connected, or HTTP 409 because Windows reserves the port), the client
   sends the waiting application an OAuth error (`OAuth.CancelRequest`) so that it fails at once.
 - `--gcm` and `--nuget-plugin` replace the process via `execvpe`. Git Credential Manager and MSAL.NET offer browser

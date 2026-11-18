@@ -20,7 +20,9 @@ internal sealed record OpenResult(string? Session);
 
 internal sealed record ErrorResult(string Error);
 
-internal sealed record PingResult(int Version, int Pid, int Sessions, TunnelStatus[] Tunnels);
+/// <summary>The helper's state. Machine and IdleSeconds, the time since the last keyboard or mouse input on that PC, tell
+/// clients which of several PCs the user is at; older helpers do not send them.</summary>
+internal sealed record PingResult(int Version, int Pid, int Sessions, TunnelStatus[] Tunnels, string? Machine = null, int? IdleSeconds = null);
 
 /// <summary>A tunnel's state; <c>Client</c> is the remote client's version once the helper has checked it.</summary>
 internal sealed record TunnelStatus(string Name, string State, string Detail, DateTimeOffset Since, string Client = "");

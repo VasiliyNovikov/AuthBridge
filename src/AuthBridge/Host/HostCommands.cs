@@ -53,6 +53,7 @@ internal static partial class HostCommands
         Updater.DeleteReplacedFiles();
         using var tunnels = new TunnelSet(Protocol.ControlPort);
         helper.Tunnels = tunnels.Statuses;
+        helper.IdleSeconds = IdleSeconds;
         // Not disposed, because the tray icon may cancel it at any time.
         var stopping = new CancellationTokenSource();
         Console.CancelKeyPress += (_, e) =>
@@ -91,6 +92,13 @@ internal static partial class HostCommands
             ? new ProcessStartInfo(browser, arguments.Select(argument => argument.Replace("{url}", url)))
             : new ProcessStartInfo(url) { UseShellExecute = true };
         Process.Start(info)?.Dispose();
+    }
+
+    /// <summary>The time since the last keyboard or mouse input in this Windows session.</summary>
+    private static int? IdleSeconds()
+    {
+        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
+        return GetLastInputInfo(ref info) ? (int)(unchecked((uint)Environment.TickCount - info.Time) / 1000) : null;
     }
 
     /// <summary>Starts the helper in a folder, unless one is running.</summary>
@@ -281,6 +289,16 @@ internal static partial class HostCommands
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetHandleInformation(nint handle, uint mask, uint flags);
+
+    private struct LastInputInfo
+    {
+        public uint Size;
+        public uint Time;
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetLastInputInfo(ref LastInputInfo info);
 
     private const nint HwndBroadcast = 0xFFFF;
     private const uint WmSettingChange = 0x001A;

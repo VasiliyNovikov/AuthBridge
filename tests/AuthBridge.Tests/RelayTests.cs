@@ -52,6 +52,25 @@ public sealed class RelayTests
         Assert.IsNull(session);
     }
 
+    [TestMethod]
+    public void PrefersTheHelperOfThePcUsedMostRecently()
+    {
+        var now = DateTime.UtcNow;
+        Bridge.Connection[] helpers =
+        [
+            new(ControlClient.ForPort(1), new(Protocol.Version, 1, 0, [], "home", IdleSeconds: 7200), now),
+            new(ControlClient.ForPort(1), new(Protocol.Version, 2, 0, [], "older, without idle time"), now.AddMinutes(-5)),
+            new(ControlClient.ForPort(1), new(Protocol.Version, 3, 0, [], "office", IdleSeconds: 5), now.AddHours(-8)),
+            new(ControlClient.ForPort(1), new(Protocol.Version, 4, 0, [], "newer, without idle time"), now.AddMinutes(-1)),
+        ];
+
+        var order = Bridge.Preferred(helpers).Select(helper => helper.Info.Machine).ToArray();
+
+        CollectionAssert.AreEqual(new[] { "office", "home", "newer, without idle time", "older, without idle time" }, order);
+        foreach (var helper in helpers)
+            helper.Dispose();
+    }
+
     private static Helper StartHelper()
     {
         var helper = new Helper(_ => Assert.Fail("Dry runs do not open a browser."));

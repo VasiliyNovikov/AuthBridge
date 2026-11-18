@@ -20,6 +20,9 @@ internal sealed class Helper(Action<string> openBrowser) : IAsyncDisposable
 
     public Func<TunnelStatus[]> Tunnels { get; set; } = () => [];
 
+    /// <summary>The time since the last keyboard or mouse input on this PC, in seconds, if known.</summary>
+    public Func<int?> IdleSeconds { get; set; } = () => null;
+
     public int Port => _server?.Port ?? throw new InvalidOperationException("The helper is not started.");
 
     /// <summary>Listens on the loopback control port; throws <see cref="SocketException"/> if it is in use.</summary>
@@ -61,7 +64,8 @@ internal sealed class Helper(Action<string> openBrowser) : IAsyncDisposable
         {
             return (request.Method, segments) switch
             {
-                ("GET", ["v1", "ping"]) => Reply(200, new PingResult(Protocol.Version, Environment.ProcessId, _sessions.Count, Tunnels()), Json.Default.PingResult),
+                ("GET", ["v1", "ping"]) => Reply(200,
+                    new PingResult(Protocol.Version, Environment.ProcessId, _sessions.Count, Tunnels(), Environment.MachineName, IdleSeconds()), Json.Default.PingResult),
                 ("POST", ["v1", "open"]) => await OpenAsync(Parse(request, Json.Default.OpenRequest)),
                 (_, ["v1", "sessions", var id, .. var action]) when _sessions.TryGetValue(id, out var session) => await SessionAsync(session, request, action),
                 (_, ["v1", "sessions", ..]) => Error(404, "relay session closed"),

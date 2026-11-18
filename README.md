@@ -102,7 +102,7 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 | Linux | |
 | --- | --- |
 | `authbridge URL...` | Open URLs in the Windows browser (used through `BROWSER`). |
-| `authbridge --status` | Check the connection to the Windows helper. |
+| `authbridge --status` | Show the connected Windows helpers, and which one gets sign-ins. |
 | `authbridge --env` | Print the command that sets `BROWSER`; `eval "$(authbridge --env)"` sets it in a shell that was already open. |
 | `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget`, `--setup-all` | Configure the shell and integrations. |
 
@@ -125,7 +125,9 @@ Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`.
 - Windows reserves some port ranges, for example for Hyper-V. If an application picked such a port, its sign-in
   fails at once and succeeds on retry.
 - For SSH hosts with a `RemoteCommand` in `~/.ssh/config`, add `-o RemoteCommand=none` to `install-remote`.
-- When several Windows machines connect to one Linux machine, URLs open on the most recently connected one.
+- Several Windows machines, for example at home and at the office, can connect to the same Linux machine. Sign-ins
+  open on the one whose keyboard or mouse was used most recently; `authbridge --status` on Linux shows which one that
+  is. Keep them on the same version with `authbridge update`.
 - The control API listens on `127.0.0.1` only, and requires a custom header that web pages cannot send.
 
 ## Development
