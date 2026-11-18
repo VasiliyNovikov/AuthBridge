@@ -46,9 +46,9 @@ Do step 2 once, and the other steps for each machine.
    irm https://raw.githubusercontent.com/VasiliyNovikov/AuthBridge/main/install.ps1 | iex
 3. Run `.\authbridge install-remote <name> <the ssh arguments>`, where <name> is this machine's name in
    %USERPROFILE%\.authbridge\config.json if it is already there, or else a new short name.
-4. Run `.\authbridge remote <name> --setup-gcm`, which only changes Git Credential Manager helpers, if any, and
-   `.\authbridge remote <name> --setup-nuget`, which fails harmlessly without the Azure Artifacts credential provider
-   (NuGet then needs ~/.local/bin on PATH, which Ubuntu's default ~/.profile provides).
+4. Run `.\authbridge remote <name> --setup-all`. It sets up the shell, and Git Credential Manager and the Azure
+   Artifacts credential provider if they are installed (NuGet then needs ~/.local/bin on PATH, which Ubuntu's default
+   ~/.profile provides).
 5. Confirm that `.\authbridge status` shows the tunnel as connected and that `.\authbridge remote <name> --status`
    succeeds; if not, check %USERPROFILE%\.authbridge\host.log. Then tell me to open a new SSH session.
 ```
@@ -78,7 +78,8 @@ To install without the script, extract `authbridge-win-x64.zip` (`authbridge-win
 [latest release](https://github.com/VasiliyNovikov/AuthBridge/releases/latest) to a folder of your choice, and run
 `.\authbridge install` there.
 
-Optional integrations, run on the Linux machine, or from Windows as `authbridge remote devbox --setup-gcm` and so on:
+Optional integrations, run on the Linux machine, or from Windows as `authbridge remote devbox --setup-gcm` and so on.
+`--setup-all` sets up the shell and each integration whose tool is installed.
 
 | Command | Effect |
 | --- | --- |
@@ -99,7 +100,7 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 | --- | --- |
 | `authbridge URL...` | Open URLs in the Windows browser (used through `BROWSER`). |
 | `authbridge --status` | Check the connection to the Windows helper. |
-| `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget` | Configure the shell and integrations. |
+| `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget`, `--setup-all` | Configure the shell and integrations. |
 
 On Windows, the dot on the helper's notification area icon is green when all machines are connected, yellow when some
 are, and gray when none are. Hover over it for each machine's state, or right-click it to open the log or exit.

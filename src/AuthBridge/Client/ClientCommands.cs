@@ -13,7 +13,7 @@ internal static class ClientCommands
         Usage (Linux):
           authbridge URL...       open URLs in the Windows browser (set as $BROWSER)
           authbridge --status     check the connection to the Windows helper
-          authbridge --setup-shell | --setup-gcm | --setup-nuget
+          authbridge --setup-shell | --setup-gcm | --setup-nuget | --setup-all
         """;
 
     public static Task<int> RunAsync(string[] args) => args switch
@@ -22,6 +22,7 @@ internal static class ClientCommands
         ["--setup-shell"] => Task.FromResult(Setup.Shell()),
         ["--setup-gcm"] => Setup.GcmAsync(),
         ["--setup-nuget"] => Task.FromResult(Setup.NuGet()),
+        ["--setup-all"] => Setup.AllAsync(),
         ["--gcm", var program, .. var rest] => Wrappers.GcmAsync(program, rest),
         ["--nuget-plugin", .. var rest] => Wrappers.NuGetPluginAsync(rest),
         [RelayCommand, var socket, var session, var port] => RelayAsync(socket, session, int.Parse(port)),

@@ -62,6 +62,17 @@ internal static class Setup
         return 0;
     }
 
+    /// <summary>Configures the shell and the integrations of the tools that are installed.</summary>
+    [SupportedOSPlatform("linux")]
+    public static async Task<int> AllAsync()
+    {
+        var result = Math.Max(Shell(), await GcmAsync());
+        if (File.Exists(Wrappers.NuGetProviderDll))
+            return Math.Max(result, NuGet());
+        Console.WriteLine("NuGet: skipped, the Azure Artifacts credential provider is not installed");
+        return result;
+    }
+
     /// <summary>Adds the authbridge block to a shell init file, or replaces the existing one.</summary>
     public static string WithBlock(string content, string body)
     {
