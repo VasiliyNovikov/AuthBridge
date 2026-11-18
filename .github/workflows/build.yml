@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - run: ./publish.ps1 -Version ($env:GITHUB_REF_NAME -replace '^v')
+      - run: dotnet release.cs ($env:GITHUB_REF_NAME -replace '^v')
       - run: gh release create $env:GITHUB_REF_NAME (Get-ChildItem artifacts -File).FullName --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

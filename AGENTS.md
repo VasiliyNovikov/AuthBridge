@@ -7,12 +7,12 @@ Guidance for AI agents and contributors working on this repository. User documen
 Requires the .NET 11 SDK (pinned in `global.json`).
 
 ```shell
-dotnet test                    # builds and runs the tests (MSTest on Microsoft.Testing.Platform)
-./publish.ps1 -Version 1.2.3   # self-contained, single-file, trimmed binaries and release zips in ./artifacts
+dotnet test              # builds and runs the tests (MSTest on Microsoft.Testing.Platform)
+dotnet release.cs 1.2.3  # self-contained, single-file, trimmed binaries and release zips in ./artifacts
 ```
 
 Warnings are errors, including trimming warnings. Pushing a `vX.Y.Z` tag makes CI (`.github/workflows/build.yml`)
-run `publish.ps1` and create a GitHub release with its artifacts.
+run `release.cs` and create a GitHub release with its artifacts.
 
 ## Layout
 
@@ -40,7 +40,7 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 
 - Windows children inherit every inheritable handle. `HostCommands.StartAsync` clears the inherit flag on the standard
   handles before it starts the helper; otherwise `authbridge start` never finishes when its output is redirected.
-- `publish.ps1` derives `authbridgew.exe` from `authbridge.exe` by setting the PE subsystem to GUI, so the helper
+- `release.cs` derives `authbridgew.exe` from `authbridge.exe` by setting the PE subsystem to GUI, so the helper
   started at logon has no console window.
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
