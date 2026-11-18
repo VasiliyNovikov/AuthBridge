@@ -11,8 +11,10 @@ dotnet test              # builds and runs the tests (MSTest on Microsoft.Testin
 dotnet release.cs 1.2.3  # self-contained, single-file, trimmed binaries and release zips in ./artifacts
 ```
 
-Warnings are errors, including trimming warnings. Pushing a `vX.Y.Z` tag makes CI (`.github/workflows/build.yml`)
-run `release.cs` and create a GitHub release with its artifacts.
+Warnings are errors, including trimming warnings. CI (`.github/workflows/build.yml`) runs the tests on x64 and Arm64
+Linux and Windows, builds the packages with `release.cs`, and runs each one on its own platform: the Linux clients
+print their version, and the Windows packages install, start and stop the helper. For a `vX.Y.Z` tag, it then
+publishes those packages as a GitHub release.
 
 ## Layout
 

@@ -9,8 +9,9 @@ on:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -19,22 +20,66 @@ jobs:
           global-json-file: global.json
       - run: dotnet test
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+  package:
     # Windows, so that the Windows executables get their version resources.
     runs-on: windows-latest
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: pwsh
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - run: dotnet release.cs ($env:GITHUB_REF_NAME -replace '^v')
-      - run: gh release create $env:GITHUB_REF_NAME (Get-ChildItem artifacts -File).FullName --generate-notes
+      - run: |
+          dotnet release.cs ($env:GITHUB_REF_TYPE -eq 'tag' ? ($env:GITHUB_REF_NAME -replace '^v') : '0.0.0-dev')
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: artifacts/
+          if-no-files-found: error
+
+  # Runs each package on its own platform.
+  smoke-test:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, package: authbridge-linux-x64 }
+          - { os: ubuntu-24.04-arm, package: authbridge-linux-arm64 }
+          - { os: windows-latest, package: authbridge-win-x64.zip }
+          - { os: windows-11-arm, package: authbridge-win-arm64.zip }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+      - if: runner.os == 'Linux'
+        run: chmod +x ${{ matrix.package }} && ./${{ matrix.package }} --version
+      - if: runner.os == 'Windows'
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Expand-Archive ${{ matrix.package }} package
+          ./package/authbridge.exe --version
+          ./package/authbridge.exe install
+          Start-Sleep 5
+          $authbridge = "$env:LOCALAPPDATA\Programs\AuthBridge\authbridge.exe"
+          & $authbridge status
+          & $authbridge stop
+          Get-Content ~/.authbridge/host.log
+          # Logged only if the helper exited through its window, which 'authbridge stop' closes, rather than being killed.
+          if (-not (Select-String -Quiet 'helper stopping' ~/.authbridge/host.log)) { throw 'the helper did not stop through its window' }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, smoke-test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages
+          path: packages
+      - run: gh release create "$GITHUB_REF_NAME" packages/* --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
