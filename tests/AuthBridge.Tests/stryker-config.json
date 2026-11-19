@@ -5,6 +5,7 @@
       "Common/OAuth.cs",
       "Common/Http.cs",
       "Common/AppVersion.cs",
+      "Common/PosixShell.cs",
       "Client/Bridge.cs",
       "Client/Relay.cs"
     ],

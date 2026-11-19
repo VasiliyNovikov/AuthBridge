@@ -29,6 +29,7 @@ public sealed class SetupTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
     [DataRow("")]
     [DataRow("/my other browser")]
     public async Task BrowserExportPassesTheChosenLiteralPathToChildShells(string existing)

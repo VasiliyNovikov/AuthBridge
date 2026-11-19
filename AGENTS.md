@@ -40,7 +40,8 @@ CI never rewrites it. Other platforms can run the same command, but their test c
 From `tests/AuthBridge.Tests`, run `dotnet tool restore` and `dotnet stryker`. `stryker-config.json` lists individual
 source files relative to `src/AuthBridge`. The Microsoft.Testing.Platform runner selects tests marked
 `[TestCategory("Mutation")]`. Open `StrykerOutput/<run>/reports/mutation-report.html` to see which changes the
-tests missed; the JSON report is in the same directory.
+tests missed; the JSON report is in the same directory. To reproduce the POSIX quoting result, run on Linux:
+the test passes the quoted path through a real `sh` and is skipped on other platforms.
 
 The relay target exercises `ForwardAsync`. Stryker currently rolls back the mutations in `Relay.RunAsync` after a
 compile error, so the relay score does not measure its polling and reconnect loop.
