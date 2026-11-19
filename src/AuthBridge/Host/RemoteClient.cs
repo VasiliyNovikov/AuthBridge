@@ -8,6 +8,15 @@ internal static class RemoteClient
     /// <summary>A remote machine's architecture, home directory, and client version, which is null without a client.</summary>
     public sealed record Machine(string Architecture, string Home, string? Version)
     {
+        /// <summary>A machine without a client needs an explicit install. Never replace a newer client's files.</summary>
+        public async Task<string?> UpgradeIfOlderAsync(string bundledVersion, Func<string, Task> upload)
+        {
+            if (Version is null || !AppVersion.IsNewer(bundledVersion, Version))
+                return Version;
+            await upload(Architecture);
+            return bundledVersion;
+        }
+
         internal static Machine Parse(string output)
         {
             var lines = output.TrimEnd('\r', '\n').Split('\n', StringSplitOptions.TrimEntries);

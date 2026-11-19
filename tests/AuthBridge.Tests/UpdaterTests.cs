@@ -25,6 +25,24 @@ public sealed class UpdaterTests
         Assert.ThrowsExactly<IOException>(() => RemoteClient.Machine.Parse("x86_64\n\n/unexpected-third-line\n"));
 
     [TestMethod]
+    [DataRow("1.2.2", true)]
+    [DataRow("1.2.3", false)]
+    [DataRow("1.2.4", false)]
+    [DataRow(null, false)]
+    public async Task ConnectingOnlyUploadsToAnInstalledOlderClient(string? installed, bool shouldUpload)
+    {
+        var machine = new RemoteClient.Machine("arm64", "/home/dev", installed);
+        var uploads = new List<string>();
+        var reported = await machine.UpgradeIfOlderAsync("1.2.3", arch =>
+        {
+            uploads.Add(arch);
+            return Task.CompletedTask;
+        });
+        Assert.AreEqual(shouldUpload ? "1.2.3" : installed, reported);
+        CollectionAssert.AreEqual(shouldUpload ? new[] { "arm64" } : Array.Empty<string>(), uploads.ToArray());
+    }
+
+    [TestMethod]
     public async Task UpdateWaitsForConnectedClientVersionsButNotOfflineMachines()
     {
         var online = new TunnelStatus("online", "starting", "", DateTimeOffset.UtcNow);
