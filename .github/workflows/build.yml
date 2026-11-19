@@ -110,7 +110,13 @@ jobs:
           }
           ./package/authbridge.exe install
           Start-Sleep 5
-          $authbridge = "$env:LOCALAPPDATA\Programs\AuthBridge\authbridge.exe"
+          $folder = "$env:LOCALAPPDATA\Programs\AuthBridge"
+          $authbridge = Join-Path $folder 'authbridge.exe'
+          & $authbridge install
+          $logon = Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name authbridge
+          if ($logon -ne ('"{0}\authbridgew.exe" serve' -f $folder)) { throw 'Incorrect helper logon command' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
+          if (@($userPath -eq $folder).Count -ne 1) { throw 'The installation must appear exactly once on the user PATH' }
           & $authbridge status
           & $authbridge stop
           Get-Content ~/.authbridge/host.log

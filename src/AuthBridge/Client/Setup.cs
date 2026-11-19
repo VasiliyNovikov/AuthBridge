@@ -18,19 +18,21 @@ internal static class Setup
 
     /// <summary>Exports BROWSER in the login and interactive shell init files.</summary>
     [SupportedOSPlatform("linux")]
-    public static int Shell()
+    public static int Shell() => ConfigureShell(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Self, Console.Out);
+
+    internal static int ConfigureShell(string home, string executable, TextWriter output)
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var login = new[] { ".bash_profile", ".bash_login" }.FirstOrDefault(name => File.Exists(Path.Combine(home, name))) ?? ".profile";
+        var export = ExportBrowser(executable);
         foreach (var path in new[] { login, ".bashrc" }.Select(name => Path.Combine(home, name)))
         {
             var content = File.Exists(path) ? File.ReadAllText(path) : "";
-            var updated = WithBlock(content, ExportBrowser(Self));
+            var updated = WithBlock(content, export);
             if (updated != content)
                 File.WriteAllText(path, updated);
-            Console.WriteLine($"{path}: {(updated == content ? "already configured" : "configured")}");
+            output.WriteLine($"{path}: {(updated == content ? "already configured" : "configured")}");
         }
-        Console.WriteLine($"New shells get BROWSER; in shells that are already open, run: eval \"$({Self} --env)\"");
+        output.WriteLine($"New shells get BROWSER; in shells that are already open, run: eval \"$({PosixShell.Quote(executable)} --env)\"");
         return 0;
     }
 

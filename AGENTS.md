@@ -14,8 +14,9 @@ dotnet release.cs 1.2.3  # self-contained, single-file, trimmed binaries and rel
 
 Warnings are errors, including trimming warnings. CI (`.github/workflows/build.yml`) runs unit tests on x64 and Arm64
 Linux and builds all packages on Linux with `release.cs`. Each package runs on its native architecture: the Linux
-clients print their version, and the Windows runners check the executable's version resource and install, start and
-stop the helper. For a `vX.Y.Z` tag, CI publishes those same packages as a GitHub release.
+clients print their version, and the Windows runners check the executable's version resource, install the helper,
+repeat installation in place, verify its logon command and user PATH entry, and stop it. For a `vX.Y.Z` tag, CI
+publishes those same packages as a GitHub release.
 
 ### CRAP baseline
 

@@ -40,17 +40,21 @@ internal static partial class HostCommands
 
     private static async Task<int> StopAsync()
     {
-        if (await PingAsync() is not { } running)
-        {
+        if (!await StopIfRunningAsync())
             Console.WriteLine("authbridge helper is not running");
-            return 0;
-        }
+        return 0;
+    }
+
+    private static async Task<bool> StopIfRunningAsync()
+    {
+        if (await PingAsync() is not { } running)
+            return false;
         using var helper = Process.GetProcessById(running.Pid);
         // Exiting through its tray icon lets the helper remove the icon and close its tunnels.
         if (!TrayIcon.RequestExit(running.Pid) || !helper.WaitForExit(TimeSpan.FromSeconds(15)))
             helper.Kill(entireProcessTree: true);
         Console.WriteLine($"authbridge helper stopped (pid {running.Pid})");
-        return 0;
+        return true;
     }
 
     /// <summary>Installs the latest release over this installation and restarts the helper, which then updates the
@@ -83,15 +87,15 @@ internal static partial class HostCommands
     private static async Task<int> InstallAsync()
     {
         var installation = InstalledPackage.CurrentUser;
+        if (await installation.InstallFromAsync(AppContext.BaseDirectory, StopIfRunningAsync))
+            Console.WriteLine($"installed authbridge {AppVersion.Release} in {installation.Location}");
+        RegisterForCurrentUser(installation);
+        return await StartAsync(installation.Location);
+    }
+
+    private static void RegisterForCurrentUser(InstalledPackage installation)
+    {
         var folder = installation.Location;
-        if (!string.Equals(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), folder, StringComparison.OrdinalIgnoreCase))
-        {
-            // A running helper restarts with the new version.
-            if (await PingAsync() is not null)
-                await StopAsync();
-            installation.InstallFrom(AppContext.BaseDirectory);
-            Console.WriteLine($"installed authbridge {AppVersion.Release} in {folder}");
-        }
         var command = installation.LogonCommand;
         using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
             run.SetValue("authbridge", command);
@@ -111,7 +115,6 @@ internal static partial class HostCommands
             SendMessageTimeout(HwndBroadcast, WmSettingChange, 0, "Environment", SmtoAbortIfHung, 5000, out _);
             Console.WriteLine($"Added {folder} to your PATH; terminals started from now on can run 'authbridge'");
         }
-        return await StartAsync(folder);
     }
 
     private static async Task<int> InstallRemoteAsync(string name, string[] ssh)

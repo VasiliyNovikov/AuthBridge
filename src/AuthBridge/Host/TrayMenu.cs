@@ -2,17 +2,18 @@ namespace AuthBridge.Host;
 
 internal sealed class TrayMenu(Action openLog, Func<bool> canUpdate, Action update, Action about, Action exit)
 {
-    public sealed record Item(string Label, Action Invoke);
-
-    /// <summary>A snapshot: each menu position continues to name the same action until this popup closes.</summary>
-    public List<Item> Open()
+    /// <summary>Bind the popup's one-based selection to the actions it displayed. Zero means it was dismissed.</summary>
+    public void Show(Func<IReadOnlyList<string>, int> select)
     {
-        List<Item> items = [new("Open log", openLog)];
+        List<(string Label, Action Invoke)> items = [("Open log", openLog)];
         if (canUpdate())
-            items.Add(new("Update", UpdateIfAvailable));
-        items.Add(new("About", about));
-        items.Add(new("Exit", exit));
-        return items;
+            items.Add(("Update", UpdateIfAvailable));
+        items.Add(("About", about));
+        items.Add(("Exit", exit));
+
+        var command = select([.. items.Select(item => item.Label)]);
+        if (command > 0 && command <= items.Count)
+            items[command - 1].Invoke();
     }
 
     private void UpdateIfAvailable()

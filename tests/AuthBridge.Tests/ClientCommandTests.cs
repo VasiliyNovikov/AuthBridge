@@ -1,10 +1,29 @@
 using AuthBridge.Client;
+using AuthBridge.Common;
 
 namespace AuthBridge.Tests;
 
 [TestClass]
 public sealed class ClientCommandTests
 {
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task VersionCommandPrintsTheFullBuildVersionWithoutContactingAHelper()
+    {
+        var previous = Console.Out;
+        using var output = new StringWriter();
+        try
+        {
+            Console.SetOut(output);
+            Assert.AreEqual(0, await Program.Main(["--version"]));
+            Assert.AreEqual(AppVersion.Informational + Environment.NewLine, output.ToString());
+        }
+        finally
+        {
+            Console.SetOut(previous);
+        }
+    }
+
     [TestMethod]
     [DoNotParallelize]
     [DataRow("--dryrun", "not-a-url")]
@@ -21,7 +40,7 @@ public sealed class ClientCommandTests
         try
         {
             Console.SetError(errors);
-            Assert.AreEqual(1, await ClientCommands.RunAsync(args));
+            Assert.AreEqual(1, await Program.Main(args));
             StringAssert.Contains(errors.ToString(), "Usage (Linux)");
         }
         finally

@@ -96,6 +96,50 @@ public sealed class UpdaterTests
     }
 
     [TestMethod]
+    public async Task InstallingAReplacementWaitsForShutdownButAnInPlaceInstallLeavesTheHelperAlone()
+    {
+        var root = Directory.CreateTempSubdirectory("authbridge-replace-");
+        try
+        {
+            var source = root.CreateSubdirectory("source").FullName;
+            var target = root.CreateSubdirectory("installed").FullName;
+            var executable = Path.Combine(target, "authbridge.exe");
+            File.WriteAllText(executable, "running");
+            File.WriteAllText(Path.Combine(source, "authbridge.exe"), "replacement");
+            var package = new InstalledPackage(target);
+            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var install = package.InstallFromAsync(source, () => stopped.Task);
+
+            Assert.IsFalse(install.IsCompleted);
+            Assert.AreEqual("running", File.ReadAllText(executable));
+            stopped.SetResult();
+            Assert.IsTrue(await install);
+            Assert.AreEqual("replacement", File.ReadAllText(executable));
+            Assert.IsFalse(await package.InstallFromAsync(Path.Combine(target, "."), () => throw new AssertFailedException("Unexpected helper shutdown.")));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task MissingPackageExecutableDoesNotStopTheRunningHelper()
+    {
+        var source = Directory.CreateTempSubdirectory("authbridge-incomplete-");
+        try
+        {
+            var package = new InstalledPackage(Path.Combine(source.FullName, "target"));
+            await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
+                package.InstallFromAsync(source.FullName, () => throw new AssertFailedException("Unexpected helper shutdown.")));
+        }
+        finally
+        {
+            source.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void ReplacingAPackageKeepsAnOpenExecutableReadable()
     {
         var directory = Directory.CreateTempSubdirectory("authbridge-install-");

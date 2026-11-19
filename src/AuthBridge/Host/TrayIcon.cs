@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -187,14 +188,27 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         if (popup != _window)
             return;
         ApplyMenuTheme();
-        var items = _menu.Open();
+        _menu.Show(labels => TrackMenu(labels, x, y));
+    }
+
+    private int TrackMenu(IReadOnlyList<string> labels, int x, int y)
+    {
         var menu = CreatePopupMenu();
-        for (var i = 0; i < items.Count; i++)
-            AppendMenuW(menu, 0, (nuint)(i + 1), items[i].Label);
-        var command = TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0); // TPM_RETURNCMD | TPM_RIGHTBUTTON
-        DestroyMenu(menu);
-        if (command > 0 && command <= items.Count)
-            items[command - 1].Invoke();
+        if (menu == 0)
+            throw new Win32Exception(Marshal.GetLastPInvokeError());
+        try
+        {
+            for (var i = 0; i < labels.Count; i++)
+            {
+                if (AppendMenuW(menu, 0, (nuint)(i + 1), labels[i]) == 0)
+                    throw new Win32Exception(Marshal.GetLastPInvokeError());
+            }
+            return TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0); // TPM_RETURNCMD | TPM_RIGHTBUTTON
+        }
+        finally
+        {
+            DestroyMenu(menu);
+        }
     }
 
     private void ApplyMenuTheme()
@@ -357,10 +371,10 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static partial void FlushMenuThemes();
 
-    [LibraryImport("user32.dll")]
+    [LibraryImport("user32.dll", SetLastError = true)]
     private static partial nint CreatePopupMenu();
 
-    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    [LibraryImport("user32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial int AppendMenuW(nint menu, uint flags, nuint id, string text);
 
     [LibraryImport("user32.dll")]

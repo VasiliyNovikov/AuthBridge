@@ -49,12 +49,21 @@ internal sealed class InstalledPackage(string location)
         DeleteReplacedFiles();
     }
 
-    /// <summary>Installs the package in a folder, such as the one this program runs from.</summary>
-    public void InstallFrom(string folder)
+    /// <summary>Copies a package into place after stopping the helper. An in-place install needs neither step.</summary>
+    public async Task<bool> InstallFromAsync(string folder, Func<Task> stopIfRunning)
     {
-        foreach (var name in PackageFiles.Where(name => File.Exists(Path.Combine(folder, name))))
-            Replace(name, path => File.Copy(Path.Combine(folder, name), path));
+        var source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        if (string.Equals(source, Path.TrimEndingDirectorySeparator(Path.GetFullPath(Location)), StringComparison.OrdinalIgnoreCase))
+            return false;
+        var executable = Path.Combine(source, "authbridge.exe");
+        if (!File.Exists(executable))
+            throw new FileNotFoundException("The Windows package is missing authbridge.exe.", executable);
+
+        await stopIfRunning();
+        foreach (var name in PackageFiles.Where(name => File.Exists(Path.Combine(source, name))))
+            Replace(name, path => File.Copy(Path.Combine(source, name), path));
         DeleteReplacedFiles();
+        return true;
     }
 
     /// <summary>Deletes the files that updates replaced, except those still in use.</summary>

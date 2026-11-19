@@ -1,4 +1,4 @@
 {
-  "methodThreshold": 30,
+  "methodThreshold": 25,
   "maxTotalCrapLoad": 15.000
 }

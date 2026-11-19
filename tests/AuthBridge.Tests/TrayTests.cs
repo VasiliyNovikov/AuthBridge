@@ -72,14 +72,19 @@ public sealed class TrayTests
         var actions = new List<string>();
         var menu = new TrayMenu(() => actions.Add("log"), () => available, () => actions.Add("update"),
             () => actions.Add("about"), () => actions.Add("exit"));
-        var original = menu.Open();
-        CollectionAssert.AreEqual(new[] { "Open log", "About", "Exit" }, original.Select(item => item.Label).ToArray());
-        available = true;
-        original[1].Invoke();
-        var update = menu.Open().Single(item => item.Label == "Update");
-        update.Invoke();
-        available = false;
-        update.Invoke();
+        menu.Show(labels =>
+        {
+            CollectionAssert.AreEqual(new[] { "Open log", "About", "Exit" }, labels.ToArray());
+            available = true;
+            return 2; // The visible item is still About, not Update.
+        });
+        menu.Show(labels =>
+        {
+            CollectionAssert.AreEqual(new[] { "Open log", "Update", "About", "Exit" }, labels.ToArray());
+            return 2;
+        });
+        menu.Show(_ => { available = false; return 2; });
+        menu.Show(_ => 0); // Dismissing the menu must not run anything.
         CollectionAssert.AreEqual(new[] { "about", "update" }, actions.ToArray());
     }
 
