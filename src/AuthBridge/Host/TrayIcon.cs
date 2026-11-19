@@ -34,6 +34,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private uint _color;
     private bool _shown;
     private Process? _updater;
+    private bool _canThemeMenus = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362);
 
     private bool CanUpdate => _updater is null && _updateAvailable();
 
@@ -194,12 +195,31 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     private nint CreateMenu()
     {
+        ApplyMenuTheme();
         var menu = CreatePopupMenu();
         AppendMenuW(menu, 0, OpenLogCommand, "Open log");
         if (CanUpdate)
             AppendMenuW(menu, 0, UpdateCommand, "Update");
         AppendMenuW(menu, 0, ExitCommand, "Exit");
         return menu;
+    }
+
+    private void ApplyMenuTheme()
+    {
+        if (!_canThemeMenus)
+            return;
+        try
+        {
+            // Since Windows 10 1903, UXTheme ordinal 135 accepts AllowDark (1): Windows still chooses the palette.
+            RefreshImmersiveColorPolicyState();
+            SetPreferredAppMode(1);
+            FlushMenuThemes();
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException)
+        {
+            _canThemeMenus = false;
+            Log.Warn($"Windows menu theming is unavailable: {e.Message}");
+        }
     }
 
     private void RunCommand(int command)
@@ -342,6 +362,18 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     [LibraryImport("user32.dll")]
     private static partial int DestroyIcon(nint icon);
+
+    [LibraryImport("uxtheme.dll", EntryPoint = "#104")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial void RefreshImmersiveColorPolicyState();
+
+    [LibraryImport("uxtheme.dll", EntryPoint = "#135")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial int SetPreferredAppMode(int mode);
+
+    [LibraryImport("uxtheme.dll", EntryPoint = "#136")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static partial void FlushMenuThemes();
 
     [LibraryImport("user32.dll")]
     private static partial nint CreatePopupMenu();

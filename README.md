@@ -108,6 +108,7 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 
 On Windows, the dot on the helper's notification area icon is green when all machines are connected, yellow when some
 are, and gray when none are. Hover over it for each machine's state, or right-click it to open the log or exit.
+On Windows 10 version 1903 and later, the menu follows your Windows app theme.
 The helper checks for updates at startup and once an hour. When a newer release is available, choose **Update** in
 that menu to install it and restart the helper.
 Windows 11 may first put it among the hidden icons; drag it to the taskbar to keep it in view.
