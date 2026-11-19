@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using AuthBridge.Common;
 
 namespace AuthBridge.Host;
 
@@ -25,10 +26,10 @@ internal static class Updater
     /// <summary>Whether <paramref name="version"/> is a later release than <paramref name="than"/>, ignoring prerelease labels.</summary>
     public static bool IsNewer(string version, string than) => Numbers(version) > Numbers(than);
 
-    public static async Task<string> LatestAsync()
+    public static async Task<string> LatestAsync(CancellationToken stopping = default)
     {
         using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
-        using var response = await http.GetAsync($"{Releases}/latest");
+        using var response = await http.GetAsync($"{Releases}/latest", stopping);
         // GitHub redirects to the page of the latest release, .../releases/tag/v1.2.3.
         var location = response.Headers.Location?.OriginalString ?? "";
         var tag = location.LastIndexOf("/tag/v", StringComparison.Ordinal);
@@ -92,4 +93,37 @@ internal static class Updater
     }
 
     private static Version Numbers(string version) => Version.TryParse(version.Split('-', '+')[0], out var numbers) ? numbers : new();
+}
+
+/// <summary>Checks at most once an hour on the helper loop; the tray reads the last successful result without waiting.</summary>
+internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, string current)
+{
+    private DateTime _nextCheck;
+    private Task _pending = Task.CompletedTask;
+    private volatile bool _available;
+
+    public bool Available => _available;
+
+    public Task RefreshAsync(DateTime now, CancellationToken stopping = default)
+    {
+        if (now >= _nextCheck && _pending.IsCompleted)
+        {
+            _nextCheck = now.AddHours(1);
+            _pending = CheckAsync(stopping);
+        }
+        return _pending;
+    }
+
+    private async Task CheckAsync(CancellationToken stopping)
+    {
+        try
+        {
+            _available = Updater.IsNewer(await latest(stopping), current);
+        }
+        catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
+        {
+            if (!stopping.IsCancellationRequested)
+                Log.Warn($"cannot check for updates: {e.Message}");
+        }
+    }
 }

@@ -61,12 +61,14 @@ internal static partial class HostCommands
             e.Cancel = true;
             stopping.Cancel();
         };
-        using var tray = TrayIcon.Start(tunnels.Statuses, stopping.Cancel);
+        var updates = new UpdateCheck(Updater.LatestAsync, Updater.Current);
+        using var tray = TrayIcon.Start(tunnels.Statuses, () => updates.Available, stopping.Cancel);
         Log.Info($"helper listening on 127.0.0.1:{helper.Port} (pid {Environment.ProcessId})");
 
         var configTime = DateTime.MinValue;
         while (!stopping.IsCancellationRequested)
         {
+            _ = updates.RefreshAsync(DateTime.UtcNow, stopping.Token);
             if (File.GetLastWriteTimeUtc(HostConfig.FilePath) is var time && time != configTime)
             {
                 configTime = time;

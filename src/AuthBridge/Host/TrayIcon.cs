@@ -17,12 +17,13 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private const uint WmTrayCallback = 0x8001; // WM_APP + 1
     private const uint NinSelect = 0x0400, NinKeySelect = 0x0401;
     private const uint NimAdd = 0, NimModify = 1, NimDelete = 2, NimSetVersion = 4;
-    private const int OpenLogCommand = 1, ExitCommand = 2;
+    private const int OpenLogCommand = 1, ExitCommand = 2, UpdateCommand = 3;
 
     // Window procedures are static, and the helper shows a single icon.
     private static TrayIcon? s_current;
 
     private readonly Func<TunnelStatus[]> _tunnels;
+    private readonly Func<bool> _updateAvailable;
     private readonly Action _exit;
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _created = new();
@@ -32,19 +33,23 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private string _tip = "";
     private uint _color;
     private bool _shown;
+    private Process? _updater;
 
-    private TrayIcon(Func<TunnelStatus[]> tunnels, Action exit)
+    private bool CanUpdate => _updater is null && _updateAvailable();
+
+    private TrayIcon(Func<TunnelStatus[]> tunnels, Func<bool> updateAvailable, Action exit)
     {
         _tunnels = tunnels;
+        _updateAvailable = updateAvailable;
         _exit = exit;
         _thread = new Thread(Run) { IsBackground = true, Name = "Tray icon" };
         _thread.SetApartmentState(ApartmentState.STA);
     }
 
     /// <summary>Shows the icon until disposed; <paramref name="exit"/> runs on the thread pool once its window closes.</summary>
-    public static TrayIcon Start(Func<TunnelStatus[]> tunnels, Action exit)
+    public static TrayIcon Start(Func<TunnelStatus[]> tunnels, Func<bool> updateAvailable, Action exit)
     {
-        var tray = s_current = new TrayIcon(tunnels, exit);
+        var tray = s_current = new TrayIcon(tunnels, updateAvailable, exit);
         tray._thread.Start();
         tray._created.Wait();
         return tray;
@@ -95,6 +100,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         }
         finally
         {
+            _updater?.Dispose();
             _created.Set();
         }
     }
@@ -140,6 +146,13 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     private void Refresh()
     {
+        if (_updater is { HasExited: true } finished)
+        {
+            if (finished.ExitCode != 0)
+                Log.Warn($"authbridge update exited with code {finished.ExitCode}");
+            finished.Dispose();
+            _updater = null;
+        }
         var (tip, color) = Describe(_tunnels());
         if (_shown && tip == _tip && color == _color)
             return;
@@ -172,14 +185,33 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     private void ShowMenu(int x, int y)
     {
-        var menu = CreatePopupMenu();
-        AppendMenuW(menu, 0, OpenLogCommand, "Open log");
-        AppendMenuW(menu, 0, ExitCommand, "Exit");
+        var menu = CreateMenu();
         SetForegroundWindow(_window); // Otherwise the menu stays open when the user clicks elsewhere.
         var command = TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0); // TPM_RETURNCMD | TPM_RIGHTBUTTON
         DestroyMenu(menu);
+        RunCommand(command);
+    }
+
+    private nint CreateMenu()
+    {
+        var menu = CreatePopupMenu();
+        AppendMenuW(menu, 0, OpenLogCommand, "Open log");
+        if (CanUpdate)
+            AppendMenuW(menu, 0, UpdateCommand, "Update");
+        AppendMenuW(menu, 0, ExitCommand, "Exit");
+        return menu;
+    }
+
+    private void RunCommand(int command)
+    {
         if (command == OpenLogCommand && Log.FilePath is { } log)
             Process.Start(new ProcessStartInfo(log) { UseShellExecute = true })?.Dispose();
+        else if (command == UpdateCommand && CanUpdate)
+        {
+            // The updater must outlive this helper, which it stops before replacing the files.
+            var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
+            _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
+        }
         else if (command == ExitCommand)
             PostMessageW(_window, WmClose, 0, 0);
     }
