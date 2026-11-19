@@ -107,7 +107,9 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 | `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget`, `--setup-all` | Configure the shell and integrations. |
 
 On Windows, the dot on the helper's notification area icon is green when all machines are connected, yellow when some
-are, and gray when none are. Hover over it for each machine's state, or right-click it to open the log or exit.
+are, and gray when none are. Hover over it for each machine's state. Right-click the icon and choose **About** to see
+the helper's version. The About window follows your Windows app theme and respects contrast themes.
+The tray menu also lets you open the log or exit.
 On Windows 10 version 1903 and later, the menu follows your Windows app theme.
 The helper checks for updates at startup and once an hour. When a newer release is available, choose **Update** in
 that menu to install it and restart the helper.

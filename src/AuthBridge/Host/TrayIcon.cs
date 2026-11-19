@@ -17,7 +17,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private const uint WmTrayCallback = 0x8001; // WM_APP + 1
     private const uint NinSelect = 0x0400, NinKeySelect = 0x0401;
     private const uint NimAdd = 0, NimModify = 1, NimDelete = 2, NimSetVersion = 4;
-    private const int OpenLogCommand = 1, ExitCommand = 2, UpdateCommand = 3;
+    private const int OpenLogCommand = 1, ExitCommand = 2, UpdateCommand = 3, AboutCommand = 4;
 
     // Window procedures are static, and the helper shows a single icon.
     private static TrayIcon? s_current;
@@ -186,8 +186,11 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     private void ShowMenu(int x, int y)
     {
+        var popup = GetLastActivePopup(_window);
+        SetForegroundWindow(popup); // Raise the open dialog, or let a click elsewhere dismiss the menu.
+        if (popup != _window)
+            return;
         var menu = CreateMenu();
-        SetForegroundWindow(_window); // Otherwise the menu stays open when the user clicks elsewhere.
         var command = TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0); // TPM_RETURNCMD | TPM_RIGHTBUTTON
         DestroyMenu(menu);
         RunCommand(command);
@@ -200,6 +203,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         AppendMenuW(menu, 0, OpenLogCommand, "Open log");
         if (CanUpdate)
             AppendMenuW(menu, 0, UpdateCommand, "Update");
+        AppendMenuW(menu, 0, AboutCommand, "About");
         AppendMenuW(menu, 0, ExitCommand, "Exit");
         return menu;
     }
@@ -232,6 +236,8 @@ internal sealed unsafe partial class TrayIcon : IDisposable
             var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
             _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
         }
+        else if (command == AboutCommand)
+            ShowAbout();
         else if (command == ExitCommand)
             PostMessageW(_window, WmClose, 0, 0);
     }
@@ -386,6 +392,9 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     [LibraryImport("user32.dll")]
     private static partial int DestroyMenu(nint menu);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint GetLastActivePopup(nint window);
 
     [LibraryImport("user32.dll")]
     private static partial int SetForegroundWindow(nint window);
