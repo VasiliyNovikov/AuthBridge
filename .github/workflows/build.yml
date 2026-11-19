@@ -32,6 +32,37 @@ jobs:
           path: artifacts/crap/
           if-no-files-found: ignore
 
+  mutation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet tool restore
+      - name: Run mutation tests
+        working-directory: tests/AuthBridge.Tests
+        run: dotnet stryker
+      - name: Verify the reports and at least one killed mutant per target
+        working-directory: tests/AuthBridge.Tests
+        run: |
+          test -s StrykerOutput/*/reports/mutation-report.html
+          jq -er --slurpfile config stryker-config.json '
+            .files | to_entries as $files | $config[0]["stryker-config"].mutate[] as $target
+            | [$files[] | select(("/" + .key) | endswith("/" + $target)) | .value.mutants[] | select(.status == "Killed")] | length
+            | if . > 0 then "\($target): \(.) killed" else error("No killed mutants in \($target)") end
+          ' StrykerOutput/*/reports/mutation-report.json
+      - name: Upload mutation reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutation-reports
+          path: tests/AuthBridge.Tests/StrykerOutput/*/reports/
+          if-no-files-found: error
+
   package:
     runs-on: ubuntu-latest
     steps:
@@ -88,7 +119,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, smoke-test]
+    needs: [test, mutation, smoke-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write

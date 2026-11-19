@@ -46,9 +46,9 @@ the test passes the quoted path through a real `sh` and is skipped on other plat
 The relay target exercises `ForwardAsync`. Stryker currently rolls back the mutations in `Relay.RunAsync` after a
 compile error, so the relay score does not measure its polling and reconnect loop.
 
-The manual **Mutation testing** workflow runs on Ubuntu 24.04 x64 and uploads both reports. A missing report
-or a target with no killed mutants fails the job even if Stryker exits successfully. There is no PR gate or minimum score
-yet; set a score floor after repeated Linux runs establish a stable score and runtime.
+The `mutation` job in `build.yml` runs on Ubuntu 24.04 x64 for pull requests, pushes to `main`, and `v*` tags.
+It uploads both reports as `mutation-reports`. A missing report or a target with no killed mutants fails the
+build, and tagged releases wait for this job to pass. There is no minimum percentage score.
 
 ## Layout
 
