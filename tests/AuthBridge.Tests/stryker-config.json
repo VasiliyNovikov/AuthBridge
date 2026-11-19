@@ -4,6 +4,7 @@
     "mutate": [
       "Common/OAuth.cs",
       "Common/Http.cs",
+      "Common/AppVersion.cs",
       "Client/Relay.cs"
     ],
     "test-case-filter": "TestCategory=Mutation",

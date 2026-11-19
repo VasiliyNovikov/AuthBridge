@@ -8,13 +8,16 @@ namespace AuthBridge.Tests;
 public sealed class UpdaterTests
 {
     [TestMethod]
+    [TestCategory("Mutation")]
     [DataRow("0.1.7", "0.1.6", true)]
     [DataRow("0.1.10", "0.1.9+5e1f0c2", true)]
     [DataRow("0.1.6-local", "0.1.6", false)]
+    [DataRow("0.1.6", "0.1.7+build", false)]
     [DataRow("0.1.6", "0.1.7", false)]
     public void ComparesReleaseNumbers(string version, string than, bool newer) => Assert.AreEqual(newer, AppVersion.IsNewer(version, than));
 
     [TestMethod]
+    [TestCategory("Mutation")]
     [DataRow("x86_64\n/home/dev\n1.2.3+build\n", "x64", "1.2.3")]
     [DataRow("aarch64\r\n/home/dev\r\n", "arm64", null)]
     public void RemoteProbeIdentifiesTheClientPackageAndInstalledVersion(string output, string architecture, string? version) =>
