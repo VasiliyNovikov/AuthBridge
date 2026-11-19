@@ -9,7 +9,7 @@ using AuthBridge.Common;
 namespace AuthBridge.Host;
 
 /// <summary>Serves the control API: opens URLs in the browser and relays loopback redirects through relay sessions.</summary>
-internal sealed class Helper(Action<string> openBrowser) : IAsyncDisposable
+internal sealed class Helper(Action<string> openBrowser, Func<TunnelStatus[]> tunnelStatuses, Func<int?> idleSeconds) : IAsyncDisposable
 {
     private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan SessionMaxAge = TimeSpan.FromMinutes(30);
@@ -17,11 +17,6 @@ internal sealed class Helper(Action<string> openBrowser) : IAsyncDisposable
     private readonly ConcurrentDictionary<string, RelaySession> _sessions = new();
     private readonly ConcurrentDictionary<string, (string Url, DateTime Expires)> _redirects = new();
     private HttpServer? _server;
-
-    public Func<TunnelStatus[]> Tunnels { get; set; } = () => [];
-
-    /// <summary>The time since the last keyboard or mouse input on this PC, in seconds, if known.</summary>
-    public Func<int?> IdleSeconds { get; set; } = () => null;
 
     public int Port => _server?.Port ?? throw new InvalidOperationException("The helper is not started.");
 
@@ -65,7 +60,7 @@ internal sealed class Helper(Action<string> openBrowser) : IAsyncDisposable
             return (request.Method, segments) switch
             {
                 ("GET", ["v1", "ping"]) => Reply(200,
-                    new PingResult(Protocol.Version, Environment.ProcessId, _sessions.Count, Tunnels(), Environment.MachineName, IdleSeconds()), Json.Default.PingResult),
+                    new PingResult(Protocol.Version, Environment.ProcessId, _sessions.Count, tunnelStatuses(), Environment.MachineName, idleSeconds()), Json.Default.PingResult),
                 ("POST", ["v1", "open"]) => await OpenAsync(Parse(request, Json.Default.OpenRequest)),
                 (_, ["v1", "sessions", var id, .. var action]) when _sessions.TryGetValue(id, out var session) => await SessionAsync(session, request, action),
                 (_, ["v1", "sessions", ..]) => Error(404, "relay session closed"),

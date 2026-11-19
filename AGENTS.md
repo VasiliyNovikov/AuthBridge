@@ -20,20 +20,25 @@ stop the helper. For a `vX.Y.Z` tag, CI publishes those same packages as a GitHu
 
 One executable, `authbridge`; `Program.cs` runs the Windows or the Linux commands depending on the OS.
 
-- `src/AuthBridge/Host/`: the Windows helper. Control API (`Helper`), relay sessions listening on loopback ports
-  (`RelaySession`), reverse SSH tunnels (`Tunnel`), the notification area icon (`TrayIcon`), the client on remote
-  machines (`RemoteClient`), updates from GitHub releases (`Updater`), and the Windows commands (`HostCommands`).
+- `src/AuthBridge/Host/`: `HostCommands` handles the Windows CLI; `HelperHost` runs the control API (`Helper`),
+  loopback relay sessions (`RelaySession`), reverse SSH tunnels (`Tunnel`), and notification area icon (`TrayIcon`).
+  `AboutDialog` owns its dialog resources, `RemoteClient` manages the client on a remote machine, `GitHubReleases`
+  fetches releases, and `InstalledPackage` replaces the local files.
 - `src/AuthBridge/Client/`: the Linux client. The `BROWSER` entry point and commands (`ClientCommands`), tunnel socket
   discovery (`Bridge`), forwarding of relayed requests to the waiting application (`Relay`), and the shell, Git
   Credential Manager and NuGet setup and wrappers.
 - `src/AuthBridge/Common/`: minimal HTTP/1.1 server and messages, control API protocol and client, OAuth URL helpers,
-  logging and paths.
+  release version information (`AppVersion`), logging and paths.
 - `tests/AuthBridge.Tests/`: a few focused tests, including an in-process relay round trip (`RelayTests`).
 - `install.ps1`: the installer behind `irm ... | iex`. It only downloads the latest release and runs its
   `authbridge install`, and it must also run in Windows PowerShell 5.1.
 
 ## Conventions
 
+- Write code that both human contributors and AI agents can understand and maintain. Use descriptive names, keep
+  related behavior together, and make control flow easy to follow.
+- Apply SOLID principles pragmatically: give each component a clear responsibility and make its dependencies explicit.
+  Add an interface or layer only when it makes a concrete change easier to implement or test.
 - Use only the base class library. Serialize through the source-generated `Json` context in `Common/Protocol.cs`, and
   register new types there.
 - Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version. When a tunnel
@@ -56,7 +61,7 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon, which draws the
   status dot onto its pixels. Keep its images below 256 pixels as uncompressed 32-bit bitmaps.
 - Windows cannot overwrite or delete a running or memory-mapped executable, even shortly after its process exits, but
-  it can rename one. `Updater` therefore writes each new file beside the old one, renames the old one to
+  it can rename one. `InstalledPackage` therefore writes each new file beside the old one, renames the old one to
   `*.authbridge-old`, and moves the new one into place; the helper deletes the old files when it starts.
 - Microsoft Defender attack surface reduction rules on managed devices can block Windows PowerShell 5.1 from starting
   an executable that it has just downloaded or extracted ("Access is denied"); PowerShell 7 was not blocked in

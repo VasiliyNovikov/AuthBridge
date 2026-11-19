@@ -1,13 +1,13 @@
 using System.ComponentModel;
-using System.Reflection;
 using AuthBridge.Client;
+using AuthBridge.Common;
 using AuthBridge.Host;
 
 try
 {
     if (args is ["--version"])
     {
-        Console.WriteLine(typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+        Console.WriteLine(AppVersion.Informational);
         return 0;
     }
     if (OperatingSystem.IsWindows())

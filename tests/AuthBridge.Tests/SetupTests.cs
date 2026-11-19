@@ -1,4 +1,5 @@
 using AuthBridge.Client;
+using AuthBridge.Common;
 
 namespace AuthBridge.Tests;
 
@@ -25,5 +26,38 @@ public sealed class SetupTests
         CollectionAssert.AreEqual(
             new[] { "", "/bin/wb --gcm /usr/bin/git-credential-manager", "/bin/wb --gcm /usr/bin/git-credential-manager", "store", helpers[4] },
             wrapped);
+    }
+
+    [TestMethod]
+    public async Task MissingGitHelpersNeedNoWrites()
+    {
+        var calls = new List<string[]>();
+        var result = await Setup.ConfigureGcmAsync("/bin/authbridge", _ => null, args =>
+        {
+            calls.Add(args);
+            return Task.FromResult(new ProcessResult(1, "", ""));
+        });
+
+        Assert.AreEqual(0, result);
+        CollectionAssert.AreEqual(new[] { "config", "--global", "--get-all", "credential.helper" }, calls.Single());
+    }
+
+    [TestMethod]
+    [DataRow("--get-all", 1)]
+    [DataRow("--unset-all", 2)]
+    [DataRow("--add", 3)]
+    public async Task FailedGitConfigurationStopsAtTheFailingCommand(string failingOption, int expectedCalls)
+    {
+        var calls = 0;
+        var error = await Assert.ThrowsExactlyAsync<IOException>(() => Setup.ConfigureGcmAsync("/bin/authbridge", _ => null, args =>
+        {
+            calls++;
+            var result = args[2] == failingOption ? new ProcessResult(1, "", "config unavailable")
+                : new ProcessResult(0, args[2] == "--get-all" ? "/bin/git-credential-manager\nstore\n" : "", "");
+            return Task.FromResult(result);
+        }));
+
+        StringAssert.Contains(error.Message, "config unavailable");
+        Assert.AreEqual(expectedCalls, calls);
     }
 }

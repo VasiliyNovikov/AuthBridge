@@ -5,15 +5,6 @@ using AuthBridge.Common;
 
 namespace AuthBridge.Host;
 
-internal static class Ssh
-{
-    public static string[] Arguments(IEnumerable<string> target, string command, params string[] options) =>
-        ["-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", .. options, .. target, command];
-
-    public static Task<(int ExitCode, string Output, string Error)> RunAsync(IEnumerable<string> target, string command, Stream? input = null) =>
-        Processes.RunAsync("ssh", Arguments(target, command), input);
-}
-
 /// <summary>Keeps a reverse SSH tunnel from a Unix socket in the remote ~/.authbridge to the control port.</summary>
 internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 {
@@ -48,7 +39,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
         while (!_stopping.IsCancellationRequested)
         {
             var socket = $"{target.RemoteDir}/bridge-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6))}.sock";
-            var arguments = Ssh.Arguments(target.Ssh, $"cat >/dev/null; rm -f '{socket}'",
+            var arguments = Ssh.Arguments(target.Ssh, $"cat >/dev/null; rm -f {Ssh.QuoteArgument(socket)}",
                 "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
                 "-R", $"{socket}:127.0.0.1:{controlPort}");
             var uptime = Stopwatch.StartNew();
@@ -77,7 +68,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 
             SetStatus("disconnected", errors.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "ssh exited");
             if (errors.Contains("remote port forwarding failed"))
-                await Ssh.RunAsync(target.Ssh, $"mkdir -p '{target.RemoteDir}' && chmod 700 '{target.RemoteDir}'");
+                await PrepareRemoteDirectoryAsync();
             delay = uptime.Elapsed > TimeSpan.FromMinutes(1) ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 60));
             try
             {
@@ -89,6 +80,20 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
             }
         }
         SetStatus("stopped");
+    }
+
+    private async Task PrepareRemoteDirectoryAsync()
+    {
+        var directory = Ssh.QuoteArgument(target.RemoteDir);
+        try
+        {
+            var result = await Ssh.RunAsync(target.Ssh, $"mkdir -p {directory} && chmod 700 {directory}");
+            result.OutputOrThrow("cannot prepare the remote socket directory");
+        }
+        catch (Exception e) when (e is Win32Exception or IOException)
+        {
+            Log.Warn($"tunnel {target.Name}: {e.Message}");
+        }
     }
 
     private void SetStatus(string state, string detail = "")
@@ -111,11 +116,11 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
         {
             var machine = await RemoteClient.ProbeAsync(target.Ssh);
             client = machine.Version ?? "not installed";
-            if (machine.Version is { } version && Updater.IsNewer(Updater.Current, version))
+            if (machine.Version is { } version && AppVersion.IsNewer(AppVersion.Release, version))
             {
                 await RemoteClient.UploadAsync(target.Ssh, machine.Architecture);
-                Log.Info($"tunnel {target.Name}: updated the client from {version} to {Updater.Current}");
-                client = Updater.Current;
+                Log.Info($"tunnel {target.Name}: updated the client from {version} to {AppVersion.Release}");
+                client = AppVersion.Release;
             }
             _clientChecked = true;
         }

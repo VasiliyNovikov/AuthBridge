@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using AuthBridge.Common;
@@ -27,7 +26,7 @@ internal static partial class HostCommands
     public static Task<int> RunAsync(string[] args) => args switch
     {
         [] or ["status"] => StatusAsync(),
-        ["serve"] => ServeAsync(),
+        ["serve"] => HelperHost.RunAsync(),
         ["start"] => StartAsync(AppContext.BaseDirectory),
         ["stop"] => StopAsync(),
         ["install"] => InstallAsync(),
@@ -36,72 +35,6 @@ internal static partial class HostCommands
         ["update"] => UpdateAsync(),
         _ => Task.FromResult(Program.Fail(Usage)),
     };
-
-    private static async Task<int> ServeAsync()
-    {
-        Log.Init("host.log", echo: !Console.IsErrorRedirected);
-        await using var helper = new Helper(OpenBrowser);
-        try
-        {
-            helper.Start(Protocol.ControlPort);
-        }
-        catch (SocketException e)
-        {
-            Log.Info($"127.0.0.1:{Protocol.ControlPort} is unavailable ({e.Message}); another helper is probably running");
-            return 1;
-        }
-        Updater.DeleteReplacedFiles();
-        using var tunnels = new TunnelSet(Protocol.ControlPort);
-        helper.Tunnels = tunnels.Statuses;
-        helper.IdleSeconds = IdleSeconds;
-        // Not disposed, because the tray icon may cancel it at any time.
-        var stopping = new CancellationTokenSource();
-        Console.CancelKeyPress += (_, e) =>
-        {
-            e.Cancel = true;
-            stopping.Cancel();
-        };
-        var updates = new UpdateCheck(Updater.LatestAsync, Updater.Current);
-        using var tray = TrayIcon.Start(tunnels.Statuses, () => updates.Available, stopping.Cancel);
-        Log.Info($"helper listening on 127.0.0.1:{helper.Port} (pid {Environment.ProcessId})");
-
-        var configTime = DateTime.MinValue;
-        while (!stopping.IsCancellationRequested)
-        {
-            _ = updates.RefreshAsync(DateTime.UtcNow, stopping.Token);
-            if (File.GetLastWriteTimeUtc(HostConfig.FilePath) is var time && time != configTime)
-            {
-                configTime = time;
-                tunnels.Update(HostConfig.Load().Targets);
-            }
-            await helper.ExpireAsync();
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(5), stopping.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-        }
-        Log.Info("helper stopping");
-        return 0;
-    }
-
-    private static void OpenBrowser(string url)
-    {
-        var info = HostConfig.Load().BrowserCommand is [var browser, .. var arguments]
-            ? new ProcessStartInfo(browser, arguments.Select(argument => argument.Replace("{url}", url)))
-            : new ProcessStartInfo(url) { UseShellExecute = true };
-        Process.Start(info)?.Dispose();
-    }
-
-    /// <summary>The time since the last keyboard or mouse input in this Windows session.</summary>
-    private static int? IdleSeconds()
-    {
-        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
-        return GetLastInputInfo(ref info) ? (int)(unchecked((uint)Environment.TickCount - info.Time) / 1000) : null;
-    }
 
     /// <summary>Starts the helper in a folder, unless one is running.</summary>
     private static async Task<int> StartAsync(string folder)
@@ -165,18 +98,19 @@ internal static partial class HostCommands
     /// client on each machine when its tunnel connects.</summary>
     private static async Task<int> UpdateAsync()
     {
-        var latest = await Updater.LatestAsync();
-        if (!Updater.IsNewer(latest, Updater.Current))
+        var latest = await GitHubReleases.LatestAsync();
+        if (!AppVersion.IsNewer(latest, AppVersion.Release))
         {
-            Console.WriteLine($"authbridge {Updater.Current} is up to date");
+            Console.WriteLine($"authbridge {AppVersion.Release} is up to date");
             return 0;
         }
         Console.WriteLine($"downloading authbridge {latest}");
-        var package = await Updater.DownloadAsync(latest);
+        var package = await GitHubReleases.DownloadAsync(latest);
         await StopAsync();
-        Updater.Install(package);
-        Console.WriteLine($"updated {Updater.InstallDir} from {Updater.Current} to {latest}");
-        if (await StartAsync(Updater.InstallDir) != 0)
+        var installation = InstalledPackage.CurrentUser;
+        installation.Install(package);
+        Console.WriteLine($"updated {installation.Location} from {AppVersion.Release} to {latest}");
+        if (await StartAsync(installation.Location) != 0)
             return 1;
         PingResult? info = null;
         for (var attempt = 0; attempt < 45; attempt++)
@@ -186,24 +120,25 @@ internal static partial class HostCommands
             if (info is null || info.Tunnels.All(tunnel => tunnel.State == "connected" ? tunnel.Client.Length > 0 : tunnel.State == "disconnected"))
                 break;
         }
-        await StatusAsync();
+        var status = await StatusAsync();
         if (info?.Tunnels.Any(tunnel => tunnel.State != "connected") == true)
             Console.WriteLine("Machines that are not connected get the new client when their tunnels connect.");
-        return 0;
+        return status;
     }
 
     /// <summary>Installs this package for the current user unless it runs from the installation, starts the helper now
     /// and at logon, and adds the installation to the user PATH.</summary>
     private static async Task<int> InstallAsync()
     {
-        var folder = Updater.InstallDir;
+        var installation = InstalledPackage.CurrentUser;
+        var folder = installation.Location;
         if (!string.Equals(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), folder, StringComparison.OrdinalIgnoreCase))
         {
             // A running helper restarts with the new version.
             if (await PingAsync() is not null)
                 await StopAsync();
-            Updater.InstallFrom(AppContext.BaseDirectory);
-            Console.WriteLine($"installed authbridge {Updater.Current} in {folder}");
+            installation.InstallFrom(AppContext.BaseDirectory);
+            Console.WriteLine($"installed authbridge {AppVersion.Release} in {folder}");
         }
         var windowless = Path.Combine(folder, Windowless);
         var command = File.Exists(windowless) ? $"\"{windowless}\" serve" : $"\"{Path.Combine(folder, "authbridge.exe")}\" start";
@@ -234,7 +169,8 @@ internal static partial class HostCommands
         var machine = await RemoteClient.ProbeAsync(ssh);
         await RemoteClient.UploadAsync(ssh, machine.Architecture);
         Console.WriteLine($"installed {machine.Home}/.local/bin/authbridge");
-        Console.Write((await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --setup-shell")).Output);
+        var setup = await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --setup-shell");
+        Console.Write(setup.OutputOrThrow("remote shell setup failed"));
 
         var config = HostConfig.Load();
         (config with { Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/.authbridge")] }).Save();
@@ -260,8 +196,7 @@ internal static partial class HostCommands
         var targets = HostConfig.Load().Targets;
         if (targets.FirstOrDefault(target => target.Name == name) is not { } target)
             return Program.Fail($"no machine named '{name}'; configured: {string.Join(", ", targets.Select(target => target.Name))}");
-        // Single quotes pass each argument to the remote shell unchanged.
-        var command = string.Join(' ', ["~/.local/bin/authbridge", .. arguments.Select(argument => $"'{argument.Replace("'", "'\\''")}'")]);
+        var command = string.Join(' ', ["~/.local/bin/authbridge", .. arguments.Select(Ssh.QuoteArgument)]);
         var (exitCode, output, error) = await Ssh.RunAsync(target.Ssh, command);
         Console.Write(output);
         Console.Error.Write(error);
@@ -291,16 +226,6 @@ internal static partial class HostCommands
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetHandleInformation(nint handle, uint mask, uint flags);
-
-    private struct LastInputInfo
-    {
-        public uint Size;
-        public uint Time;
-    }
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetLastInputInfo(ref LastInputInfo info);
 
     private const nint HwndBroadcast = 0xFFFF;
     private const uint WmSettingChange = 0x001A;

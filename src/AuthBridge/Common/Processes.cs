@@ -2,6 +2,17 @@ using System.Diagnostics;
 
 namespace AuthBridge.Common;
 
+internal readonly record struct ProcessResult(int ExitCode, string Output, string Error)
+{
+    public string OutputOrThrow(string operation)
+    {
+        if (ExitCode == 0)
+            return Output;
+        var message = $"{operation} (exit code {ExitCode})";
+        throw new IOException(string.IsNullOrWhiteSpace(Error) ? message : $"{message}: {Error.Trim()}");
+    }
+}
+
 internal static class Processes
 {
     /// <summary>A windowless child process with redirected standard streams.</summary>
@@ -20,7 +31,7 @@ internal static class Processes
         return info;
     }
 
-    public static async Task<(int ExitCode, string Output, string Error)> RunAsync(string file, IEnumerable<string> arguments, Stream? input = null)
+    public static async Task<ProcessResult> RunAsync(string file, IEnumerable<string> arguments, Stream? input = null)
     {
         using var process = Process.Start(StartInfo(file, arguments))!;
         var output = process.StandardOutput.ReadToEndAsync();
@@ -36,6 +47,6 @@ internal static class Processes
             // The process exited early; its exit code and error output tell why.
         }
         await process.WaitForExitAsync();
-        return (process.ExitCode, await output, await error);
+        return new(process.ExitCode, await output, await error);
     }
 }

@@ -237,7 +237,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
             _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
         }
         else if (command == AboutCommand)
-            ShowAbout();
+            AboutDialog.Show(_window, GetModuleHandleW(null));
         else if (command == ExitCommand)
             PostMessageW(_window, WmClose, 0, 0);
     }

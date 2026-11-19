@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using AuthBridge.Common;
 using AuthBridge.Host;
 
 namespace AuthBridge.Tests;
@@ -10,7 +12,7 @@ public sealed class UpdaterTests
     [DataRow("0.1.10", "0.1.9+5e1f0c2", true)]
     [DataRow("0.1.6-local", "0.1.6", false)]
     [DataRow("0.1.6", "0.1.7", false)]
-    public void ComparesReleaseNumbers(string version, string than, bool newer) => Assert.AreEqual(newer, Updater.IsNewer(version, than));
+    public void ComparesReleaseNumbers(string version, string than, bool newer) => Assert.AreEqual(newer, AppVersion.IsNewer(version, than));
 
     [TestMethod]
     public async Task OffersOnlyConfirmedUpdatesAndCachesTheCheck()
@@ -45,5 +47,30 @@ public sealed class UpdaterTests
         Assert.IsFalse(updates.Available);
         await updates.RefreshAsync(now.AddHours(1));
         Assert.IsTrue(updates.Available);
+    }
+
+    [TestMethod]
+    public void ReplacingAPackageKeepsAnOpenExecutableReadable()
+    {
+        var directory = Directory.CreateTempSubdirectory("authbridge-install-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "authbridge.exe");
+            File.WriteAllBytes(path, [1]);
+            using var running = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            using var contents = new MemoryStream();
+            using (var zip = new ZipArchive(contents, ZipArchiveMode.Create, leaveOpen: true))
+            using (var entry = zip.CreateEntry("authbridge.exe").Open())
+                entry.WriteByte(2);
+
+            new InstalledPackage(directory.FullName).Install(contents.ToArray());
+
+            Assert.AreEqual(1, running.ReadByte());
+            CollectionAssert.AreEqual(new byte[] { 2 }, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 }

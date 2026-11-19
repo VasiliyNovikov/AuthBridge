@@ -1,3 +1,5 @@
+using AuthBridge.Common;
+
 namespace AuthBridge.Host;
 
 /// <summary>The Linux client on a remote machine, in ~/.local/bin/authbridge.</summary>
@@ -11,11 +13,11 @@ internal static class RemoteClient
         // A client that cannot tell its version counts as version 0, which any release replaces.
         var probe = await Ssh.RunAsync(ssh, "uname -m; echo \"$HOME\"; " +
             "if [ -x ~/.local/bin/authbridge ]; then ~/.local/bin/authbridge --version 2>/dev/null || echo 0; fi");
-        var lines = probe.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (probe.ExitCode != 0 || lines.Length < 2 || !lines[1].StartsWith('/'))
-            throw new IOException($"cannot query the remote machine: {probe.Error.Trim()}");
+        var lines = probe.OutputOrThrow("cannot query the remote machine").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length < 2 || !lines[1].StartsWith('/'))
+            throw new IOException("cannot query the remote machine: expected its architecture and absolute home directory");
         var architecture = lines[0] switch { "x86_64" => "x64", "aarch64" or "arm64" => "arm64", var machine => machine };
-        return new(architecture, lines[1], lines.Length > 2 ? Updater.WithoutMetadata(lines[2]) : null);
+        return new(architecture, lines[1], lines.Length > 2 ? AppVersion.WithoutMetadata(lines[2]) : null);
     }
 
     /// <summary>Installs the client that matches this helper.</summary>
@@ -29,7 +31,6 @@ internal static class RemoteClient
         var upload = await Ssh.RunAsync(ssh, "mkdir -p ~/.authbridge ~/.local/bin && chmod 700 ~/.authbridge && " +
             "t=$(mktemp ~/.local/bin/.authbridge.XXXXXX) && trap 'rm -f \"$t\"' EXIT && " +
             "cat > \"$t\" && chmod 755 \"$t\" && mv -f \"$t\" ~/.local/bin/authbridge", binary);
-        if (upload.ExitCode != 0)
-            throw new IOException($"upload failed: {upload.Error.Trim()}");
+        upload.OutputOrThrow("upload failed");
     }
 }

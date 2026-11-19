@@ -43,19 +43,27 @@ internal static class Setup
 
     /// <summary>Wraps Git Credential Manager in the global credential.helper list with "authbridge --gcm".</summary>
     [SupportedOSPlatform("linux")]
-    public static async Task<int> GcmAsync()
+    public static Task<int> GcmAsync() => ConfigureGcmAsync(Self, Posix.Which, args => Processes.RunAsync("git", args));
+
+    internal static async Task<int> ConfigureGcmAsync(string self, Func<string, string?> which, Func<string[], Task<ProcessResult>> git)
     {
-        var output = (await Git("config", "--global", "--get-all", "credential.helper")).Output;
+        var read = await git(["config", "--global", "--get-all", "credential.helper"]);
+        // git config --get-all exits with 1 and no output when the key is absent.
+        var output = read is { ExitCode: 1, Output: "", Error: "" } ? "" : read.OutputOrThrow("cannot read git credential.helper");
         string[] helpers = output.Length == 0 ? [] : output.TrimEnd('\n').Split('\n');
-        var wrapped = WrapGcmHelpers(helpers, Self, Posix.Which);
+        var wrapped = WrapGcmHelpers(helpers, self, which);
         if (wrapped.SequenceEqual(helpers))
         {
             Console.WriteLine("git credential.helper: nothing to change");
             return 0;
         }
-        await Git("config", "--global", "--unset-all", "credential.helper");
+        var unset = await git(["config", "--global", "--unset-all", "credential.helper"]);
+        unset.OutputOrThrow("cannot unset git credential.helper");
         foreach (var helper in wrapped)
-            await Git("config", "--global", "--add", "credential.helper", helper);
+        {
+            var add = await git(["config", "--global", "--add", "credential.helper", helper]);
+            add.OutputOrThrow("cannot add git credential.helper");
+        }
         Console.WriteLine($"git credential.helper: [{string.Join(", ", helpers)}] -> [{string.Join(", ", wrapped)}]");
         return 0;
     }
@@ -102,18 +110,14 @@ internal static class Setup
 
     /// <summary>Puts "authbridge --gcm" in front of the Git Credential Manager entries of a credential.helper list.</summary>
     public static string[] WrapGcmHelpers(string[] helpers, string self, Func<string, string?> which) =>
-    [
-        .. helpers.Select(helper =>
+        Array.ConvertAll(helpers, helper =>
         {
             var parts = helper.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (parts is [] || parts[0].StartsWith('!') || parts.Contains("--gcm"))
                 return helper;
             var program = parts[0].StartsWith('/') ? parts[0] : which("git-credential-" + parts[0]);
-            return Path.GetFileName(program) is "git-credential-manager" or "git-credential-manager-core"
-                ? string.Join(' ', [self, "--gcm", program!, .. parts[1..]])
-                : helper;
-        }),
-    ];
-
-    private static Task<(int ExitCode, string Output, string Error)> Git(params string[] args) => Processes.RunAsync("git", args);
+            if (program is null || Path.GetFileName(program) is not ("git-credential-manager" or "git-credential-manager-core"))
+                return helper;
+            return string.Join(' ', [self, "--gcm", program, .. parts[1..]]);
+        });
 }

@@ -10,6 +10,8 @@
     try {
         Invoke-WebRequest "https://github.com/VasiliyNovikov/AuthBridge/releases/latest/download/authbridge-win-$architecture.zip" -OutFile "$package.zip" -UseBasicParsing
         Expand-Archive "$package.zip" $package -Force
+        # Check the exit code ourselves on both PowerShell 5.1 and 7; a failed install is not a launch failure.
+        $PSNativeCommandUseErrorActionPreference = $false
         try { & "$package\authbridge.exe" install }
         catch {
             # Microsoft Defender attack surface reduction rules can block Windows PowerShell from starting a program it
@@ -17,6 +19,7 @@
             $reason = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
             throw "Cannot start authbridge.exe ($reason). If Microsoft Defender blocked it, run this command in PowerShell 7 (pwsh)."
         }
+        if ($LASTEXITCODE -ne 0) { throw "authbridge install exited with code $LASTEXITCODE." }
     }
     finally {
         Remove-Item "$package.zip", $package -Recurse -Force -ErrorAction SilentlyContinue

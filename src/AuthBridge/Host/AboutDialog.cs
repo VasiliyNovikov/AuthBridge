@@ -1,36 +1,41 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using AuthBridge.Common;
 using Microsoft.Win32;
 
 namespace AuthBridge.Host;
 
-internal sealed unsafe partial class TrayIcon
+[SupportedOSPlatform("windows")]
+internal sealed unsafe partial class AboutDialog
 {
-    private const uint AboutDarkBackground = 0x202020;
-    private bool _aboutDark;
-    private nint _aboutBackgroundBrush;
+    private const uint DarkBackground = 0x202020;
+    private const uint WmInitDialog = 0x0110;
+    private readonly nint _backgroundBrush;
+    private bool _dark;
 
-    private void ShowAbout()
+    private AboutDialog(nint backgroundBrush) => _backgroundBrush = backgroundBrush;
+
+    public static void Show(nint owner, nint instance)
     {
         // The icon control also uses this brush in an off-screen DC, where a stock DC_BRUSH would be white.
-        _aboutBackgroundBrush = CreateSolidBrush(AboutDarkBackground);
-        if (_aboutBackgroundBrush == 0)
+        var brush = CreateSolidBrush(DarkBackground);
+        if (brush == 0)
             throw new InvalidOperationException("could not create the About background brush");
         try
         {
-            fixed (ushort* template = AboutTemplate())
-                if (DialogBoxIndirectParamW(GetModuleHandleW(null), template, _window, AboutProc, 0) == -1)
+            var dialog = new AboutDialog(brush);
+            fixed (ushort* template = CreateTemplate())
+                if (DialogBoxIndirectParamW(instance, template, owner, dialog.HandleMessage, 0) == -1)
                     throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
         finally
         {
-            DeleteObject(_aboutBackgroundBrush);
-            _aboutBackgroundBrush = 0;
+            DeleteObject(brush);
         }
     }
 
-    private static ushort[] AboutTemplate()
+    private static ushort[] CreateTemplate()
     {
         // A DLGTEMPLATE in dialog units lets Windows lay out and scale both static controls.
         List<ushort> words = [];
@@ -59,27 +64,27 @@ internal sealed unsafe partial class TrayIcon
         StaticControl(0x43, 14, 13, 28, 24); // SS_ICON | SS_REALSIZECONTROL
         words.AddRange([0xFFFF, 32512, 0]); // ApplicationIcon resource, no creation data
         StaticControl(0, 53, 12, 151, 43);
-        Text($"Version {Updater.Current}\r\n\r\nSign in on remote Linux machines with your Windows browser.");
+        Text($"Version {AppVersion.Release}\r\n\r\nSign in on remote Linux machines with your Windows browser.");
         words.Add(0);
         return [.. words];
     }
 
-    private nint AboutProc(nint dialog, uint message, nint wParam, nint lParam)
+    private nint HandleMessage(nint dialog, uint message, nint wParam, nint lParam)
     {
         try
         {
             switch (message)
             {
-                case 0x0110: // WM_INITDIALOG
+                case WmInitDialog:
                 case 0x0015 or 0x001A or 0x031A: // WM_SYSCOLORCHANGE, WM_SETTINGCHANGE, WM_THEMECHANGED
-                    ApplyAboutTheme(dialog);
-                    return message == 0x0110 ? 1 : 0;
-                case 0x0136 or 0x0138 when _aboutDark: // WM_CTLCOLORDLG, WM_CTLCOLORSTATIC
+                    ApplyTheme(dialog);
+                    return message == WmInitDialog ? 1 : 0;
+                case 0x0136 or 0x0138 when _dark: // WM_CTLCOLORDLG, WM_CTLCOLORSTATIC
                     SetTextColor(wParam, 0xF5F5F5);
-                    SetBkColor(wParam, AboutDarkBackground);
-                    return _aboutBackgroundBrush;
+                    SetBkColor(wParam, DarkBackground);
+                    return _backgroundBrush;
                 case 0x0111 when (ushort)wParam is 1 or 2: // WM_COMMAND: Enter or Esc
-                case WmClose:
+                case 0x0010: // WM_CLOSE
                     EndDialog(dialog, 1);
                     return 1;
             }
@@ -92,17 +97,17 @@ internal sealed unsafe partial class TrayIcon
         return 0;
     }
 
-    private void ApplyAboutTheme(nint dialog)
+    private void ApplyTheme(nint dialog)
     {
         var contrast = new HighContrast { Size = (uint)sizeof(HighContrast) };
         if (SystemParametersInfoW(0x0042, contrast.Size, &contrast, 0) == 0) // SPI_GETHIGHCONTRAST
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         // Leave light and high-contrast dialogs entirely in the system palette.
-        _aboutDark = (contrast.Flags & 1) == 0 &&
+        _dark = (contrast.Flags & 1) == 0 &&
             Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) is 0;
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
-            int dark = _aboutDark ? 1 : 0;
+            int dark = _dark ? 1 : 0;
             var hr = DwmSetWindowAttribute(dialog, 20, &dark, sizeof(int)); // DWMWA_USE_IMMERSIVE_DARK_MODE
             if (hr < 0)
                 Log.Warn($"could not theme the About title bar (HRESULT 0x{hr:X8})");
