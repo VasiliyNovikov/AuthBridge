@@ -7,6 +7,14 @@ namespace AuthBridge.Tests;
 public sealed class TrayTests
 {
     [TestMethod]
+    public void AboutKeepsSystemColorsForHighContrastOrUnreadablePreferences()
+    {
+        Assert.IsFalse(AboutTheme.UseDarkPalette(() => true, () => throw new InvalidOperationException("Do not read app colors in high contrast.")));
+        Assert.IsFalse(AboutTheme.UseDarkPalette(() => false, () => throw new UnauthorizedAccessException("Theme preference is restricted.")));
+        Assert.IsTrue(AboutTheme.UseDarkPalette(() => false, () => true));
+    }
+
+    [TestMethod]
     public void MixedTunnelStatesUseThePartialConnectionColorAndListEachMachine()
     {
         var online = new TunnelStatus("dev", "connected", "", DateTimeOffset.UtcNow);

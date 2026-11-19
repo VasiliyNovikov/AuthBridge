@@ -1,10 +1,27 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security;
 using AuthBridge.Common;
 using Microsoft.Win32;
 
 namespace AuthBridge.Host;
+
+internal static class AboutTheme
+{
+    public static bool UseDarkPalette(Func<bool> highContrast, Func<bool> darkApps)
+    {
+        try
+        {
+            return !highContrast() && darkApps();
+        }
+        catch (Exception e) when (e is Win32Exception or UnauthorizedAccessException or SecurityException or IOException)
+        {
+            Log.Warn($"could not read About theme settings; using system colors: {e.Message}");
+            return false;
+        }
+    }
+}
 
 [SupportedOSPlatform("windows")]
 internal sealed unsafe partial class AboutDialog
@@ -99,12 +116,8 @@ internal sealed unsafe partial class AboutDialog
 
     private void ApplyTheme(nint dialog)
     {
-        var contrast = new HighContrast { Size = (uint)sizeof(HighContrast) };
-        if (SystemParametersInfoW(0x0042, contrast.Size, &contrast, 0) == 0) // SPI_GETHIGHCONTRAST
-            throw new Win32Exception(Marshal.GetLastPInvokeError());
-        // Leave light and high-contrast dialogs entirely in the system palette.
-        _dark = (contrast.Flags & 1) == 0 &&
-            Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) is 0;
+        _dark = AboutTheme.UseDarkPalette(HighContrastEnabled, () =>
+            Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme", 1) is 0);
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
         {
             int dark = _dark ? 1 : 0;
@@ -113,6 +126,14 @@ internal sealed unsafe partial class AboutDialog
                 Log.Warn($"could not theme the About title bar (HRESULT 0x{hr:X8})");
         }
         RedrawWindow(dialog, 0, 0, 0x0085); // RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN
+    }
+
+    private static bool HighContrastEnabled()
+    {
+        var contrast = new HighContrast { Size = (uint)sizeof(HighContrast) };
+        if (SystemParametersInfoW(0x0042, contrast.Size, &contrast, 0) == 0) // SPI_GETHIGHCONTRAST
+            throw new Win32Exception(Marshal.GetLastPInvokeError());
+        return (contrast.Flags & 1) != 0;
     }
 
     private struct HighContrast { public uint Size, Flags; public nint Scheme; }
