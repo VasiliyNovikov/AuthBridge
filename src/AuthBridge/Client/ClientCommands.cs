@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.Versioning;
 using AuthBridge.Common;
 
@@ -25,11 +26,20 @@ internal static class ClientCommands
         ["--setup-all"] => Setup.AllAsync(),
         ["--gcm", var program, .. var rest] => Wrappers.GcmAsync(program, rest),
         ["--nuget-plugin", .. var rest] => Wrappers.NuGetPluginAsync(rest),
-        [BrowserClient.RelayCommand, var socket, var session, var port] => RelayAsync(socket, session, int.Parse(port)),
-        [BrowserClient.CancelCommand, var port, var url, var reason] => CancelAsync(int.Parse(port), url, reason),
+        [BrowserClient.RelayCommand or BrowserClient.CancelCommand, ..] => RunWorkerAsync(args),
         _ when args.Where(arg => !arg.StartsWith('-')).ToArray() is [_, ..] urls => OpenAllAsync(urls, dryRun: args.Contains("--dry-run")),
         _ => Task.FromResult(Program.Fail(Usage)),
     };
+
+    private static Task<int> RunWorkerAsync(string[] args) => args switch
+    {
+        [BrowserClient.RelayCommand, var socket, var session, var port] when TryPort(port, out var number) => RelayAsync(socket, session, number),
+        [BrowserClient.CancelCommand, var port, var url, var reason] when TryPort(port, out var number) => CancelAsync(number, url, reason),
+        _ => Task.FromResult(Program.Fail("authbridge: invalid background worker arguments")),
+    };
+
+    private static bool TryPort(string value, out int port) =>
+        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
 
     private static async Task<int> StatusAsync()
     {
