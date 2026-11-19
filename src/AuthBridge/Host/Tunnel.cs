@@ -39,7 +39,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
         while (!_stopping.IsCancellationRequested)
         {
             var socket = $"{target.RemoteDir}/bridge-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6))}.sock";
-            var arguments = Ssh.Arguments(target.Ssh, $"cat >/dev/null; rm -f {Ssh.QuoteArgument(socket)}",
+            var arguments = Ssh.Arguments(target.Ssh, $"cat >/dev/null; rm -f {PosixShell.Quote(socket)}",
                 "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
                 "-R", $"{socket}:127.0.0.1:{controlPort}");
             var uptime = Stopwatch.StartNew();
@@ -94,7 +94,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 
     private async Task PrepareRemoteDirectoryAsync()
     {
-        var directory = Ssh.QuoteArgument(target.RemoteDir);
+        var directory = PosixShell.Quote(target.RemoteDir);
         try
         {
             var result = await Ssh.RunAsync(target.Ssh, $"mkdir -p {directory} && chmod 700 {directory}");

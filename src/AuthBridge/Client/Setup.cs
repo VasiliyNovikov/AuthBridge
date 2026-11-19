@@ -13,7 +13,8 @@ internal static class Setup
     private static string Self => Environment.ProcessPath!;
 
     /// <summary>The shell command in the init files; it keeps a BROWSER that is already set.</summary>
-    private static string ExportBrowser => $"export BROWSER=\"${{BROWSER:-{Self}}}\"";
+    internal static string ExportBrowser(string executable) =>
+        $"if [ -z \"${{BROWSER:-}}\" ]; then BROWSER={PosixShell.Quote(executable)}; fi; export BROWSER";
 
     /// <summary>Exports BROWSER in the login and interactive shell init files.</summary>
     [SupportedOSPlatform("linux")]
@@ -24,7 +25,7 @@ internal static class Setup
         foreach (var path in new[] { login, ".bashrc" }.Select(name => Path.Combine(home, name)))
         {
             var content = File.Exists(path) ? File.ReadAllText(path) : "";
-            var updated = WithBlock(content, ExportBrowser);
+            var updated = WithBlock(content, ExportBrowser(Self));
             if (updated != content)
                 File.WriteAllText(path, updated);
             Console.WriteLine($"{path}: {(updated == content ? "already configured" : "configured")}");
@@ -37,7 +38,7 @@ internal static class Setup
     /// runs it, but that shell can run what this prints.</summary>
     public static int Env()
     {
-        Console.WriteLine(ExportBrowser);
+        Console.WriteLine(ExportBrowser(Self));
         return 0;
     }
 
@@ -76,7 +77,7 @@ internal static class Setup
             return Program.Fail($"Azure Artifacts credential provider not found: {Wrappers.NuGetProviderDll}");
         var plugin = Path.Combine(Path.GetDirectoryName(Self)!, NuGetPluginName);
         File.Delete(plugin);
-        File.WriteAllText(plugin, $"#!/bin/sh\nexec '{Self}' --nuget-plugin \"$@\"\n");
+        File.WriteAllText(plugin, $"#!/bin/sh\nexec {PosixShell.Quote(Self)} --nuget-plugin \"$@\"\n");
         File.SetUnixFileMode(plugin, File.GetUnixFileMode(Self));
         Console.WriteLine($"{plugin}: installed; its directory must be on PATH");
         return 0;

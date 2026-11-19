@@ -183,7 +183,7 @@ internal static partial class HostCommands
         var targets = HostConfig.Load().Targets;
         if (targets.FirstOrDefault(target => target.Name == name) is not { } target)
             return Program.Fail($"no machine named '{name}'; configured: {string.Join(", ", targets.Select(target => target.Name))}");
-        var command = string.Join(' ', ["~/.local/bin/authbridge", .. arguments.Select(Ssh.QuoteArgument)]);
+        var command = string.Join(' ', ["~/.local/bin/authbridge", .. arguments.Select(PosixShell.Quote)]);
         var (exitCode, output, error) = await Ssh.RunAsync(target.Ssh, command);
         Console.Write(output);
         Console.Error.Write(error);

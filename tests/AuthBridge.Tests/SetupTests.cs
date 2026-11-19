@@ -29,6 +29,22 @@ public sealed class SetupTests
     }
 
     [TestMethod]
+    [DataRow("")]
+    [DataRow("/my other browser")]
+    public async Task BrowserExportPassesTheChosenLiteralPathToChildShells(string existing)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("Requires a POSIX shell.");
+            return;
+        }
+        const string executable = "/home/team's $tools/authbridge";
+        var script = $"BROWSER=$1; {Setup.ExportBrowser(executable)}; sh -c 'printf %s \"$BROWSER\"'";
+        var result = await Processes.RunAsync("sh", ["-c", script, "sh", existing]);
+        Assert.AreEqual(existing.Length == 0 ? executable : existing, result.OutputOrThrow("shell export failed"));
+    }
+
+    [TestMethod]
     public async Task MissingGitHelpersNeedNoWrites()
     {
         var calls = new List<string[]>();
