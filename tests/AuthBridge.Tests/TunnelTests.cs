@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using AuthBridge.Common;
 using AuthBridge.Host;
 
 namespace AuthBridge.Tests;
@@ -5,6 +7,32 @@ namespace AuthBridge.Tests;
 [TestClass]
 public sealed class TunnelTests
 {
+    [TestMethod]
+    public async Task StoppingATunnelClosesItsChildAndCompletesItsLifetime()
+    {
+        // Like the remote tunnel command, this benign local process exits when standard input closes.
+        using var child = Process.Start(Processes.StartInfo(OperatingSystem.IsWindows() ? "sort.exe" : "cat", []))!;
+        using var observer = Process.GetProcessById(child.Id);
+        using var tunnel = new Tunnel(new Target("test", ["host"], "/home/test machine/.authbridge"), 12345, args =>
+        {
+            Assert.IsTrue(args.Any(arg => arg.EndsWith(":127.0.0.1:12345", StringComparison.Ordinal)));
+            return child;
+        });
+        try
+        {
+            var lifetime = tunnel.RunAsync();
+            tunnel.Dispose();
+            await lifetime.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.IsTrue(observer.HasExited);
+            Assert.AreEqual("stopped", tunnel.Status.State);
+        }
+        finally
+        {
+            if (!observer.HasExited)
+                observer.Kill();
+        }
+    }
+
     [TestMethod]
     public void ShortFailuresBackOffButAStableConnectionResetsTheDelay()
     {

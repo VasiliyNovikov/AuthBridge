@@ -6,7 +6,7 @@ using AuthBridge.Common;
 namespace AuthBridge.Host;
 
 /// <summary>Keeps a reverse SSH tunnel from a Unix socket in the remote ~/.authbridge to the control port.</summary>
-internal sealed class Tunnel(Target target, int controlPort) : IDisposable
+internal sealed class Tunnel(Target target, int controlPort, Func<string[], Process> startSsh) : IDisposable
 {
     private readonly CancellationTokenSource _stopping = new();
     private readonly Lock _gate = new();
@@ -14,7 +14,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 
     public TunnelStatus Status { get; private set; } = new(target.Name, "starting", "", DateTimeOffset.Now);
 
-    public void Start() => _ = RunAsync();
+    public Tunnel(Target target, int controlPort) : this(target, controlPort, Ssh.Start) { }
 
     public void Dispose() => _stopping.Cancel();
 
@@ -33,7 +33,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
         }
     }
 
-    private async Task RunAsync()
+    public async Task RunAsync()
     {
         var delay = TimeSpan.FromSeconds(2);
         while (!_stopping.IsCancellationRequested)
@@ -77,7 +77,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 
     private async Task<string> ConnectOnceAsync(string[] arguments)
     {
-        using var ssh = Process.Start(Processes.StartInfo("ssh", arguments))!;
+        using var ssh = startSsh(arguments);
         // Register on this specific process, including when shutdown raced with Process.Start.
         using var stop = _stopping.Token.Register(() => StopSsh(ssh));
         var stderr = ssh.StandardError.ReadToEndAsync();
@@ -169,7 +169,7 @@ internal sealed class TunnelSet(int controlPort) : IDisposable
             {
                 var tunnel = new Tunnel(target, controlPort);
                 _tunnels.Add(key, tunnel);
-                tunnel.Start();
+                _ = tunnel.RunAsync();
             }
         }
     }
