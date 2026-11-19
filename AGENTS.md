@@ -42,6 +42,9 @@ source files relative to `src/AuthBridge`. The Microsoft.Testing.Platform runner
 `[TestCategory("Mutation")]`. Open `StrykerOutput/<run>/reports/mutation-report.html` to see which changes the
 tests missed; the JSON report is in the same directory.
 
+The relay target exercises `ForwardAsync`. Stryker currently rolls back the mutations in `Relay.RunAsync` after a
+compile error, so the relay score does not measure its polling and reconnect loop.
+
 The manual **Mutation testing** workflow runs on Ubuntu 24.04 x64 and uploads both reports. A missing report
 or a target with no killed mutants fails the job even if Stryker exits successfully. There is no PR gate or minimum score
 yet; set a score floor after repeated Linux runs establish a stable score and runtime.

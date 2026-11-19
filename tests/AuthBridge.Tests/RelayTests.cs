@@ -41,6 +41,24 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task ForwardsTheCallbackFormAndReturnsTheRedirectWithoutFollowingIt()
+    {
+        const string Form = "application/x-www-form-urlencoded";
+        await using var application = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(
+            (request.Method, request.Target, request.GetHeader("Content-Type")) == ("POST", "/callback", Form)
+                ? new HttpResponse(303, [new("Location", "/done")], request.Body, "Continue sign-in")
+                : new HttpResponse(404, [], [])));
+        var callback = new HttpRequest("POST", "/callback", [new("Content-Type", Form)], "state=ok"u8.ToArray());
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var response = await Relay.ForwardAsync(application.Port, callback, stop.Token);
+
+        Assert.AreEqual((303, "Continue sign-in", "/done"), (response.Status, response.Reason, Http.Find(response.Headers, "Location")));
+        CollectionAssert.AreEqual(callback.Body, response.Body);
+    }
+
+    [TestMethod]
     public async Task PingReportsLiveHostStateFromTheFirstRequest()
     {
         TunnelStatus[] tunnels = [new("dev", "connected", "", DateTimeOffset.UtcNow)];
