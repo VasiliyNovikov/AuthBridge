@@ -11,14 +11,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - run: dotnet test
+      - name: Run x64 tests and check the whole-app CRAP baseline
+        if: matrix.os == 'ubuntu-24.04'
+        run: dotnet crap.cs
+      - name: Run Arm64 tests
+        if: matrix.os == 'ubuntu-24.04-arm'
+        run: dotnet test
+      - name: Upload CRAP analysis and coverage
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-24.04' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: crap-analysis
+          path: artifacts/crap/
+          if-no-files-found: ignore
 
   package:
     runs-on: ubuntu-latest

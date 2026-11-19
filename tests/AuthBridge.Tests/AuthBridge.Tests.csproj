@@ -1,6 +1,7 @@
 <Project Sdk="MSTest.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="coverlet.MTP" Version="10.1.0" PrivateAssets="all" />
     <ProjectReference Include="..\..\src\AuthBridge\AuthBridge.csproj" />
   </ItemGroup>
 

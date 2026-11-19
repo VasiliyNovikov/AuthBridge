@@ -8,6 +8,7 @@ Requires the .NET 11 SDK (pinned in `global.json`).
 
 ```shell
 dotnet test              # builds and runs the tests (MSTest on Microsoft.Testing.Platform)
+dotnet crap.cs           # runs the Release tests with coverage and checks the whole-app CRAP load
 dotnet release.cs 1.2.3  # self-contained, single-file, trimmed binaries and release zips in ./artifacts
 ```
 
@@ -15,6 +16,22 @@ Warnings are errors, including trimming warnings. CI (`.github/workflows/build.y
 Linux and builds all packages on Linux with `release.cs`. Each package runs on its native architecture: the Linux
 clients print their version, and the Windows runners check the executable's version resource and install, start and
 stop the helper. For a `vX.Y.Z` tag, CI publishes those same packages as a GitHub release.
+
+### CRAP baseline
+
+The Ubuntu 24.04 x64 test job runs `dotnet crap.cs` instead of running the tests twice. The script restores the
+repo-local Crap4DotNet tool and analyzes `src/AuthBridge` (not tests, build scripts, `bin`, or `obj`) using Cobertura
+line coverage from Coverlet's MTP extension. The `crap-analysis` CI artifact and local `artifacts/crap/` directory
+contain `report.json` with the method scores and matching warnings, and `coverage.cobertura.xml`.
+
+The gate compares **total CRAP load**, not the sum or average of the method scores. A method's score is
+`complexity^2 * (1 - coverage)^3 + complexity`, where coverage is a fraction. Only methods scoring **above** the
+configured threshold contribute load: `complexity * (1 - coverage) + complexity / threshold`. CI fails if their
+combined load, rounded to three decimal places, exceeds `maxTotalCrapLoad` in `crap-baseline.json`. Improvements
+can offset regressions elsewhere, so use the method report to see what changed.
+
+To tighten the ceiling after an improvement, copy the new Linux x64 load into the baseline in a reviewed change.
+CI never rewrites it. Other platforms can run the same command, but their test coverage can differ.
 
 ## Layout
 
