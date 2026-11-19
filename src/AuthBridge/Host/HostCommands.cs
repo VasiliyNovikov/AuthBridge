@@ -9,38 +9,25 @@ namespace AuthBridge.Host;
 [SupportedOSPlatform("windows")]
 internal static partial class HostCommands
 {
-    private const string Usage = """
-        Usage (Windows):
-          authbridge install            install for this user, start the helper now and at logon, and add it to PATH
-          authbridge install-remote NAME [SSH OPTIONS...] DESTINATION
-                                        install the client on a Linux machine and keep a tunnel to it
-          authbridge remote NAME ARGS...
-                                        run the client on that machine, e.g. remote devbox --setup-gcm
-          authbridge update             install the latest release; Linux machines get it when they connect
-          authbridge start | stop | status | serve
-        """;
-
-    public static Task<int> RunAsync(string[] args) => args switch
+    private static readonly HostCommandLine Commands = new(new Dictionary<string, Func<Task<int>>>(StringComparer.Ordinal)
     {
-        [] or ["status"] => StatusAsync(),
-        ["serve"] => HelperHost.RunAsync(),
-        ["start"] => StartAsync(AppContext.BaseDirectory),
-        ["stop"] => StopAsync(),
-        ["install"] => InstallAsync(),
-        ["install-remote", var name, .. var ssh] when ssh.Length > 0 => InstallRemoteAsync(name, ssh),
-        ["remote", var name, .. var arguments] when arguments.Length > 0 => RemoteAsync(name, arguments),
-        ["update"] => UpdateAsync(),
-        _ => Task.FromResult(Program.Fail(Usage)),
-    };
+        ["status"] = StatusAsync,
+        ["serve"] = HelperHost.RunAsync,
+        ["start"] = () => StartAsync(AppContext.BaseDirectory),
+        ["stop"] = StopAsync,
+        ["install"] = InstallAsync,
+        ["update"] = UpdateAsync,
+    }, InstallRemoteAsync, RemoteAsync);
 
-    /// <summary>Starts the helper in a folder, unless one is running.</summary>
-    private static async Task<int> StartAsync(string folder)
+    public static Task<int> RunAsync(string[] args) => Commands.RunAsync(args);
+
+    private static HelperControl Control => new(PingAsync, Console.Out, Console.Error);
+    private static Task<int> StatusAsync() => Control.StatusAsync(Protocol.ControlPort);
+    private static Task<int> StartAsync(string folder) => Control.StartAsync(() => LaunchHelper(folder),
+        Path.Combine(Paths.StateDir, "host.log"), TimeSpan.FromMilliseconds(200));
+
+    private static void LaunchHelper(string folder)
     {
-        if (await PingAsync() is { } running)
-        {
-            Console.WriteLine($"authbridge helper is running (pid {running.Pid})");
-            return 0;
-        }
         Paths.EnsureStateDir();
         // Windows children inherit all inheritable handles; the helper must not keep the caller's output pipes open.
         foreach (var standardHandle in StandardHandles)
@@ -48,17 +35,7 @@ internal static partial class HostCommands
         // Redirected streams detach the helper from this console.
         var helper = Processes.StartInfo(new InstalledPackage(folder).HelperExecutable, ["serve"]);
         helper.WorkingDirectory = Paths.StateDir;
-        Process.Start(helper)?.Dispose();
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            await Task.Delay(200);
-            if (await PingAsync() is { } started)
-            {
-                Console.WriteLine($"authbridge helper started (pid {started.Pid})");
-                return 0;
-            }
-        }
-        return Program.Fail($"authbridge helper did not start; see {Path.Combine(Paths.StateDir, "host.log")}");
+        using var child = Process.Start(helper) ?? throw new IOException("could not launch the helper");
     }
 
     private static async Task<int> StopAsync()
@@ -73,20 +50,6 @@ internal static partial class HostCommands
         if (!TrayIcon.RequestExit(running.Pid) || !helper.WaitForExit(TimeSpan.FromSeconds(15)))
             helper.Kill(entireProcessTree: true);
         Console.WriteLine($"authbridge helper stopped (pid {running.Pid})");
-        return 0;
-    }
-
-    private static async Task<int> StatusAsync()
-    {
-        if (await PingAsync() is not { } info)
-            return Program.Fail("authbridge helper: not running");
-        Console.WriteLine($"authbridge helper: running (pid {info.Pid}, 127.0.0.1:{Protocol.ControlPort}, {info.Sessions} relay session(s))");
-        foreach (var tunnel in info.Tunnels)
-        {
-            var detail = tunnel.Detail.Length > 0 ? $" - {tunnel.Detail}" : "";
-            var client = tunnel.Client.Length > 0 ? $", client {tunnel.Client}" : "";
-            Console.WriteLine($"  tunnel {tunnel.Name}: {tunnel.State} since {tunnel.Since.LocalDateTime:yyyy-MM-dd HH:mm:ss}{client}{detail}");
-        }
         return 0;
     }
 

@@ -83,7 +83,7 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 
 ## Gotchas
 
-- Windows children inherit every inheritable handle. `HostCommands.StartAsync` clears the inherit flag on the standard
+- Windows children inherit every inheritable handle. `HostCommands.LaunchHelper` clears the inherit flag on the standard
   handles before it starts the helper; otherwise `authbridge start` never finishes when its output is redirected.
 - `release.cs` derives `authbridgew.exe` from `authbridge.exe` by setting the PE subsystem to GUI, so the helper
   started at logon has no console window.
