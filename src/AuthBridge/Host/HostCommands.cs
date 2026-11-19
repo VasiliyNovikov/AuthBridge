@@ -137,14 +137,13 @@ internal static partial class HostCommands
         using var environment = Registry.CurrentUser.CreateSubKey("Environment");
         // Unexpanded, so that entries such as %USERPROFILE%\bin keep working.
         var path = environment.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
-        var entries = path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(entry => Path.TrimEndingDirectorySeparator(Environment.ExpandEnvironmentVariables(entry)));
-        if (entries.Contains(folder, StringComparer.OrdinalIgnoreCase))
+        var updatedPath = installation.IncludeInUserPath(path);
+        if (updatedPath == path)
             Console.WriteLine($"{folder} is already on your PATH");
         else
         {
             var kind = path.Length > 0 ? environment.GetValueKind("Path") : RegistryValueKind.ExpandString;
-            environment.SetValue("Path", path.Length == 0 || path.EndsWith(';') ? path + folder : $"{path};{folder}", kind);
+            environment.SetValue("Path", updatedPath, kind);
             // Tells running programs such as Explorer, so that terminals started from now on see the new PATH.
             SendMessageTimeout(HwndBroadcast, WmSettingChange, 0, "Environment", SmtoAbortIfHung, 5000, out _);
             Console.WriteLine($"Added {folder} to your PATH; terminals started from now on can run 'authbridge'");

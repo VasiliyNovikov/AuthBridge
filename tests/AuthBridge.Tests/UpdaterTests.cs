@@ -115,9 +115,22 @@ public sealed class UpdaterTests
             Assert.AreEqual(gui, package.HelperExecutable);
             Assert.AreEqual($"\"{gui}\" serve", package.LogonCommand);
         }
+
         finally
         {
             folder.Delete(recursive: true);
         }
+    }
+
+    [TestMethod]
+    public void InstallingTwicePreservesTheOriginalUserPath()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "AuthBridge test");
+        var package = new InstalledPackage(folder);
+        var alreadyPresent = $"%SDK_HOME%;\"{folder.ToUpperInvariant()}{Path.DirectorySeparatorChar}\";";
+        Assert.AreEqual(alreadyPresent, package.IncludeInUserPath(alreadyPresent));
+        var added = package.IncludeInUserPath("%SDK_HOME%;");
+        Assert.AreEqual($"%SDK_HOME%;{folder}", added);
+        Assert.AreEqual(added, package.IncludeInUserPath(added));
     }
 }

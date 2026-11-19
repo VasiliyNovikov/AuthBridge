@@ -30,6 +30,16 @@ internal sealed class InstalledPackage(string location)
     // At logon the console executable must start a detached helper, whereas the GUI executable can serve directly.
     public string LogonCommand => WindowlessExecutable is { } gui ? $"\"{gui}\" serve" : $"\"{ConsoleExecutable}\" start";
 
+    /// <summary>Adds this installation once to the Windows user PATH, preserving the original unexpanded entries.</summary>
+    public string IncludeInUserPath(string path)
+    {
+        var entries = path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(entry => Path.TrimEndingDirectorySeparator(Environment.ExpandEnvironmentVariables(entry.Trim('"'))));
+        if (entries.Contains(Path.TrimEndingDirectorySeparator(Location), StringComparer.OrdinalIgnoreCase))
+            return path;
+        return path.Length == 0 || path.EndsWith(';') ? path + Location : $"{path};{Location}";
+    }
+
     /// <summary>Installs a release package downloaded from GitHub.</summary>
     public void Install(byte[] package)
     {
