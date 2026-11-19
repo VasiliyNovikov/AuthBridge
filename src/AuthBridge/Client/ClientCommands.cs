@@ -27,8 +27,7 @@ internal static class ClientCommands
         ["--gcm", var program, .. var rest] => Wrappers.GcmAsync(program, rest),
         ["--nuget-plugin", .. var rest] => Wrappers.NuGetPluginAsync(rest),
         [BrowserClient.RelayCommand or BrowserClient.CancelCommand, ..] => RunWorkerAsync(args),
-        _ when args.Where(arg => !arg.StartsWith('-')).ToArray() is [_, ..] urls => OpenAllAsync(urls, dryRun: args.Contains("--dry-run")),
-        _ => Task.FromResult(Program.Fail(Usage)),
+        _ => OpenAllAsync(args),
     };
 
     private static Task<int> RunWorkerAsync(string[] args) => args switch
@@ -57,8 +56,12 @@ internal static class ClientCommands
         return 0;
     }
 
-    private static async Task<int> OpenAllAsync(string[] urls, bool dryRun)
+    private static async Task<int> OpenAllAsync(string[] args)
     {
+        var urls = args.Where(arg => arg != "--dry-run").ToArray();
+        if (urls.Length == 0 || urls.Any(arg => arg.StartsWith('-')))
+            return Program.Fail(Usage);
+        var dryRun = urls.Length != args.Length;
         Log.Init("client.log");
         var browser = new BrowserClient(StartWorker, Console.Error);
         var result = 0;
