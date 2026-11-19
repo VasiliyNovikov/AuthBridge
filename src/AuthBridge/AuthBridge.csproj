@@ -4,6 +4,7 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>authbridge</AssemblyName>
     <RootNamespace>AuthBridge</RootNamespace>
+    <Features>$(Features);runtime-async=on</Features>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
     <DebugType>embedded</DebugType>

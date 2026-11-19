@@ -21,8 +21,10 @@ stop the helper. For a `vX.Y.Z` tag, CI publishes those same packages as a GitHu
 
 The Ubuntu 24.04 x64 test job runs `dotnet crap.cs` instead of running the tests twice. The script restores the
 repo-local Crap4DotNet tool and analyzes `src/AuthBridge` (not tests, build scripts, `bin`, or `obj`) using Cobertura
-line coverage from Coverlet's MTP extension. The `crap-analysis` CI artifact and local `artifacts/crap/` directory
-contain `report.json` with the method scores and matching warnings, and `coverage.cobertura.xml`.
+coverage from Coverlet's MTP extension. Crap4DotNet prefers branch coverage and falls back to line coverage when
+branch data is unavailable. Compiler changes such as runtime async can therefore change the measured load without
+changing source complexity. The `crap-analysis` CI artifact and local `artifacts/crap/` directory contain `report.json`
+with the method scores and matching warnings, and `coverage.cobertura.xml`.
 
 The gate compares **total CRAP load**, not the sum or average of the method scores. A method's score is
 `complexity^2 * (1 - coverage)^3 + complexity`, where coverage is a fraction. Only methods scoring **above** the
