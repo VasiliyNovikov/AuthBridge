@@ -48,8 +48,15 @@ The relay target exercises `ForwardAsync`. Stryker currently rolls back the muta
 compile error, so the relay score does not measure its polling and reconnect loop.
 
 The `mutation` job in `build.yml` runs on Ubuntu 24.04 x64 for pull requests, pushes to `main`, and `v*` tags.
-It uploads both reports as `mutation-reports`. A missing report or a target with no killed mutants fails the
-build, and tagged releases wait for this job to pass. There is no minimum percentage score.
+It uploads both reports as `mutation-reports`. A missing report, a target with no killed mutants, or an **overall
+mutation score** below `mutation-baseline.json` fails the build and blocks tagged releases. There are no per-file
+score floors. To check a report locally from the repo root, run `dotnet check-mutation-score.cs <mutation-report.json>`.
+
+The gate compares the exact fraction of detected mutants (killed or timed out) among valid mutants (detected,
+survived, or not covered); the displayed percentages are rounded only for readability. The initial floor is
+102/167 (61.08%), the lower of the [main](https://github.com/VasiliyNovikov/AuthBridge/actions/runs/44584029259)
+and [tag](https://github.com/VasiliyNovikov/AuthBridge/actions/runs/44584029415) runs of the same `v0.1.21` commit.
+To raise the floor, update both counts in a reviewed change using repeatable Linux x64 results. CI never rewrites them.
 
 ## Layout
 

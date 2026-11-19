@@ -55,6 +55,8 @@ jobs:
             | [$files[] | select(("/" + .key) | endswith("/" + $target)) | .value.mutants[] | select(.status == "Killed")] | length
             | if . > 0 then "\($target): \(.) killed" else error("No killed mutants in \($target)") end
           ' StrykerOutput/*/reports/mutation-report.json
+      - name: Check the overall mutation score against its baseline
+        run: dotnet check-mutation-score.cs tests/AuthBridge.Tests/StrykerOutput/*/reports/mutation-report.json
       - name: Upload mutation reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
