@@ -12,7 +12,6 @@ namespace AuthBridge.Host;
 internal sealed unsafe partial class TrayIcon : IDisposable
 {
     private const string WindowClassName = "AuthBridgeTray";
-    private const uint Green = 0x2EA043, Yellow = 0xD29922, Gray = 0x8B949E;
     private const uint WmDestroy = 0x0002, WmClose = 0x0010, WmContextMenu = 0x007B, WmTimer = 0x0113;
     private const uint WmTrayCallback = 0x8001; // WM_APP + 1
     private const uint NinSelect = 0x0400, NinKeySelect = 0x0401;
@@ -152,7 +151,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
             finished.Dispose();
             _updater = null;
         }
-        var status = Describe(_tunnels());
+        var status = TrayNotification.Describe(_tunnels());
         if (status.Color != _color)
         {
             var icon = CreateStatusIcon(status.Color);
@@ -227,16 +226,6 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         // The updater must outlive this helper, which it stops before replacing the files.
         var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
         _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
-    }
-
-    /// <summary>The tooltip, which Windows limits to 127 characters, and the icon color.</summary>
-    private static (string Tip, uint Color) Describe(TunnelStatus[] tunnels)
-    {
-        if (tunnels.Length == 0)
-            return ("AuthBridge: no machines configured", Gray);
-        var connected = tunnels.Count(tunnel => tunnel.State == "connected");
-        var tip = $"AuthBridge: {connected}/{tunnels.Length} connected" + string.Concat(tunnels.Select(tunnel => $"\n{tunnel.Name}: {tunnel.State}"));
-        return (tip.Length > 127 ? tip[..124] + "..." : tip, connected == tunnels.Length ? Green : connected > 0 ? Yellow : Gray);
     }
 
     /// <summary>The application icon with a dot in the given color at its bottom right.</summary>

@@ -1,3 +1,4 @@
+using AuthBridge.Common;
 using AuthBridge.Host;
 
 namespace AuthBridge.Tests;
@@ -5,6 +6,25 @@ namespace AuthBridge.Tests;
 [TestClass]
 public sealed class TrayTests
 {
+    [TestMethod]
+    public void MixedTunnelStatesUseThePartialConnectionColorAndListEachMachine()
+    {
+        var online = new TunnelStatus("dev", "connected", "", DateTimeOffset.UtcNow);
+        var offline = online with { Name = "build", State = "disconnected" };
+        var status = TrayNotification.Describe([online, offline]);
+        Assert.AreEqual(("AuthBridge: 1/2 connected\ndev: connected\nbuild: disconnected", 0xD29922u), status);
+    }
+
+    [TestMethod]
+    public void LongTooltipNeverSplitsASupplementaryCharacter()
+    {
+        const string prefix = "AuthBridge: 1/1 connected\n";
+        var name = new string('a', 123 - prefix.Length) + "\U0001F4BB";
+        var (tip, _) = TrayNotification.Describe([new TunnelStatus(name, "connected", "", DateTimeOffset.UtcNow)]);
+        Assert.AreEqual(prefix + name[..^2] + "...", tip);
+        Assert.IsTrue(tip.Length <= 127);
+    }
+
     [TestMethod]
     public void OpenMenuKeepsItsActionsWhenUpdateAvailabilityChanges()
     {
