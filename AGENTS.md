@@ -35,6 +35,16 @@ can offset regressions elsewhere, so use the method report to see what changed.
 To tighten the ceiling after an improvement, copy the new Linux x64 load into the baseline in a reviewed change.
 CI never rewrites it. Other platforms can run the same command, but their test coverage can differ.
 
+### OAuth mutation testing
+
+From `tests/AuthBridge.Tests`, run `dotnet tool restore` and `dotnet stryker`. Stryker mutates `Common/OAuth.cs`
+and runs `OAuthTests` with the Microsoft.Testing.Platform runner. Open `StrykerOutput/<run>/reports/mutation-report.html`
+to see which changes the tests missed; the JSON report is in the same directory.
+
+The manual **OAuth mutation testing** workflow runs on Ubuntu 24.04 x64 and uploads both reports. A missing report
+or zero killed OAuth mutants fails the job even if Stryker exits successfully. There is no PR gate or minimum score
+yet; set a score floor after repeated Linux runs establish a stable score and runtime.
+
 ## Layout
 
 One executable, `authbridge`; `Program.cs` runs the Windows or the Linux commands depending on the OS.

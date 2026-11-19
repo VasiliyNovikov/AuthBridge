@@ -11,6 +11,8 @@ public sealed class OAuthTests
     [DataRow("https://login.example/authorize?redirect_uri=http://127.0.0.1:41000/callback", 41000)]
     [DataRow("https://login.example/authorize?redirect_uri=http%3A%2F%2F%5B%3A%3A1%5D%3A42000%2F", 42000)]
     [DataRow("http://localhost:43000/?welcome", 43000)]
+    [DataRow("https://login.example/authorize?redirect_uri=https://127.0.0.1:41000/callback", null)]
+    [DataRow("https://login.example/authorize?redirect_uri=http://app.example:41000/callback", null)]
     [DataRow("https://login.example/authorize?redirect_uri=https%3A%2F%2Fapp.example%2Fcallback", null)]
     [DataRow("https://example.com/device", null)]
     public void FindsTheLoopbackRedirectPort(string url, int? port) => Assert.AreEqual(port, OAuth.LoopbackPort(url));
