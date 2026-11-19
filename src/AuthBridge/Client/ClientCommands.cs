@@ -7,8 +7,6 @@ namespace AuthBridge.Client;
 [SupportedOSPlatform("linux")]
 internal static class ClientCommands
 {
-    private const string RelayCommand = "__relay";
-    private const string CancelCommand = "__cancel";
     private const string Usage = """
         Usage (Linux):
           authbridge URL...       open URLs in the Windows browser (set as $BROWSER)
@@ -27,8 +25,8 @@ internal static class ClientCommands
         ["--setup-all"] => Setup.AllAsync(),
         ["--gcm", var program, .. var rest] => Wrappers.GcmAsync(program, rest),
         ["--nuget-plugin", .. var rest] => Wrappers.NuGetPluginAsync(rest),
-        [RelayCommand, var socket, var session, var port] => RelayAsync(socket, session, int.Parse(port)),
-        [CancelCommand, var port, var url, var reason] => CancelAsync(int.Parse(port), url, reason),
+        [BrowserClient.RelayCommand, var socket, var session, var port] => RelayAsync(socket, session, int.Parse(port)),
+        [BrowserClient.CancelCommand, var port, var url, var reason] => CancelAsync(int.Parse(port), url, reason),
         _ when args.Where(arg => !arg.StartsWith('-')).ToArray() is [_, ..] urls => OpenAllAsync(urls, dryRun: args.Contains("--dry-run")),
         _ => Task.FromResult(Program.Fail(Usage)),
     };
@@ -52,50 +50,25 @@ internal static class ClientCommands
     private static async Task<int> OpenAllAsync(string[] urls, bool dryRun)
     {
         Log.Init("client.log");
+        var browser = new BrowserClient(StartWorker, Console.Error);
         var result = 0;
         foreach (var url in urls)
-            result = Math.Max(result, await OpenAsync(url, dryRun));
+            result = Math.Max(result, await OpenAsync(browser, url, dryRun));
         return result;
     }
 
-    private static async Task<int> OpenAsync(string url, bool dryRun)
+    private static async Task<int> OpenAsync(BrowserClient browser, string url, bool dryRun)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             return Program.Fail($"authbridge: only http and https URLs can be opened in the Windows browser: {url}");
-        var port = OAuth.LoopbackPort(url);
         Log.Info($"open {OAuth.Redact(url)} {OAuth.Describe(url)} requested by {Posix.ParentChain()}");
-
+        var request = new OpenRequest(url, OAuth.LoopbackPort(url), dryRun, Environment.MachineName);
         using var bridge = await Bridge.FindAsync(TimeSpan.FromSeconds(5));
-        if (bridge is null)
-        {
-            Console.Error.WriteLine("authbridge: not connected to the Windows helper");
-            return Cancel(url, port, "the Windows helper is not connected") ? 0 : Program.Fail($"Open this URL manually:\n  {url}");
-        }
-        var (status, session, error) = await bridge.Client.OpenAsync(new OpenRequest(url, port, dryRun, Environment.MachineName));
-        if (status == 200)
-        {
-            if (session is not null)
-                Spawn(RelayCommand, bridge.Client.Endpoint, session, port.ToString()!);
-            Console.Error.WriteLine($"authbridge: opened in the browser on {bridge.Info.Machine ?? "Windows"}{(session is null ? "" : $"; relaying http://localhost:{port}")}");
-            return 0;
-        }
-        Console.Error.WriteLine($"authbridge: {error}");
-        // E.g. Windows reserves the port the application picked; a retry gets another one.
-        return status == 409 && Cancel(url, port, $"{error}; retry the sign-in") ? 0 : 1;
-    }
-
-    /// <summary>Makes the application waiting for the URL's redirect fail at once, since the redirect cannot be relayed.</summary>
-    private static bool Cancel(string url, int? port, string reason)
-    {
-        if (port is null || OAuth.CancelRequest(url, port.Value, reason) is null)
-            return false;
-        Spawn(CancelCommand, port.Value.ToString(), url, reason);
-        Console.Error.WriteLine("authbridge: sign-in cancelled; retry it later or use another sign-in method");
-        return true;
+        return await browser.OpenAsync(request, bridge);
     }
 
     /// <summary>Runs a command in the background: the caller waits for its browser command before it serves the redirect.</summary>
-    private static void Spawn(params string[] args)
+    private static void StartWorker(string[] args)
     {
         using var process = Process.Start(Processes.StartInfo(Environment.ProcessPath!, args))!;
         process.StandardInput.Close();

@@ -43,9 +43,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   loopback relay sessions (`RelaySession`), reverse SSH tunnels (`Tunnel`), and notification area icon (`TrayIcon`).
   `AboutDialog` owns its dialog resources, `RemoteClient` manages the client on a remote machine, `GitHubReleases`
   fetches releases, and `InstalledPackage` replaces the local files.
-- `src/AuthBridge/Client/`: the Linux client. The `BROWSER` entry point and commands (`ClientCommands`), tunnel socket
-  discovery (`Bridge`), forwarding of relayed requests to the waiting application (`Relay`), and the shell, Git
-  Credential Manager and NuGet setup and wrappers.
+- `src/AuthBridge/Client/`: the Linux commands (`ClientCommands`), browser requests and background worker handoff
+  (`BrowserClient`), tunnel socket discovery (`Bridge`), forwarding to the waiting application (`Relay`), and the
+  shell, Git Credential Manager and NuGet setup and wrappers.
 - `src/AuthBridge/Common/`: minimal HTTP/1.1 server and messages, control API protocol and client, OAuth URL helpers,
   release version information (`AppVersion`), logging and paths.
 - `tests/AuthBridge.Tests/`: a few focused tests, including an in-process relay round trip (`RelayTests`).

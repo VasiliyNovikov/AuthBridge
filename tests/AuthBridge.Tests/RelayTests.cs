@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -33,6 +34,20 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    public async Task PingRejectsAMismatchedProtocolVersion()
+    {
+        await using var helper = StartHelper();
+        using var client = new HttpClient(new HttpClientHandler { UseProxy = false });
+        client.DefaultRequestHeaders.Host = Protocol.HostName;
+        client.DefaultRequestHeaders.Add(Protocol.VersionHeader, (Protocol.Version + 1).ToString());
+
+        using var response = await client.GetAsync($"http://127.0.0.1:{helper.Port}/v1/ping");
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        StringAssert.Contains(await response.Content.ReadAsStringAsync(), "install the same authbridge version");
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task RelaysTheBrowserRedirectToTheApplication(bool tunnelReconnects)
@@ -41,19 +56,23 @@ public sealed class RelayTests
             [new("Set-Cookie", "a=1"), new("Set-Cookie", "b=2")],
             Encoding.UTF8.GetBytes($"{request.Method} {request.Target} {Encoding.UTF8.GetString(request.Body)}"))));
         await using var helper = StartHelper();
-        using var bridge = ControlClient.ForPort(helper.Port);
+        using var bridge = Connect(helper);
         // A dropped tunnel: nothing listens there any more, and the relay must find the helper again.
         using var dropped = ControlClient.ForPort(FreePort());
         var relayPort = FreePort();
 
-        var (status, session, _) = await bridge.OpenAsync(Open(relayPort));
+        var workers = new List<string[]>();
+        var opener = new BrowserClient(workers.Add, TextWriter.Null);
+        Assert.AreEqual(0, await opener.OpenAsync(Open(relayPort), bridge));
+        var worker = workers.Single();
+        var session = worker[2];
+        CollectionAssert.AreEqual(new[] { "__relay", bridge.Client.Endpoint, session, relayPort.ToString() }, worker);
         using var stop = new CancellationTokenSource();
-        var relay = Relay.RunAsync(tunnelReconnects ? dropped : bridge, session!, application.Port, stop.Token,
+        var relay = Relay.RunAsync(tunnelReconnects ? dropped : bridge.Client, session, application.Port, stop.Token,
             () => Task.FromResult<ControlClient?>(ControlClient.ForPort(helper.Port)));
         using var browser = new HttpClient();
         using var response = await browser.PostAsync($"http://localhost:{relayPort}/callback?x=1", new StringContent("code=c&state=s"));
 
-        Assert.AreEqual(200, status);
         Assert.AreEqual("POST /callback?x=1 code=c&state=s", await response.Content.ReadAsStringAsync());
         CollectionAssert.AreEqual(new[] { "a=1", "b=2" }, response.Headers.GetValues("Set-Cookie").ToArray());
         await stop.CancelAsync();
@@ -66,12 +85,79 @@ public sealed class RelayTests
         using var occupant = new TcpListener(IPAddress.Loopback, 0);
         occupant.Start();
         await using var helper = StartHelper();
-        using var bridge = ControlClient.ForPort(helper.Port);
+        using var bridge = Connect(helper);
 
-        var (status, session, _) = await bridge.OpenAsync(Open(((IPEndPoint)occupant.LocalEndpoint).Port));
+        var port = ((IPEndPoint)occupant.LocalEndpoint).Port;
+        var request = Open(port);
+        var (status, session, _) = await bridge.Client.OpenAsync(request);
 
         Assert.AreEqual(409, status);
         Assert.IsNull(session);
+
+        var workers = new List<string[]>();
+        var opener = new BrowserClient(workers.Add, TextWriter.Null);
+        Assert.AreEqual(0, await opener.OpenAsync(request, bridge));
+        var cancel = workers.Single();
+        CollectionAssert.AreEqual(new[] { "__cancel", port.ToString(), request.Url }, cancel[..3]);
+        StringAssert.Contains(cancel[3], "retry the sign-in");
+    }
+
+    [TestMethod]
+    public async Task DisconnectedClientOffersManualSignInUnlessItCanNotifyTheApplication()
+    {
+        var workers = new List<string[]>();
+        using var messages = new StringWriter();
+        var opener = new BrowserClient(workers.Add, messages);
+        var request = Open(45678, includeState: false);
+
+        Assert.AreEqual(1, await opener.OpenAsync(request, null));
+        Assert.IsEmpty(workers);
+        StringAssert.Contains(messages.ToString(), $"Open this URL manually:\n  {request.Url}");
+
+        var cancellable = Open(45678);
+        Assert.AreEqual(0, await opener.OpenAsync(cancellable, null));
+        CollectionAssert.AreEqual(new[] { "__cancel", "45678", cancellable.Url, "the Windows helper is not connected" }, workers.Single());
+    }
+
+    [TestMethod]
+    public async Task LongBrowserLinksCanBeUsedOnlyOnce()
+    {
+        string? launched = null;
+        await using var helper = StartHelper(url => launched = url);
+        using var bridge = Connect(helper);
+        var opener = new BrowserClient(_ => Assert.Fail("A URL without a loopback redirect needs no worker."), TextWriter.Null);
+        var url = "https://login.example/authorize?state=" + new string('x', 2100);
+        Assert.AreEqual(0, await opener.OpenAsync(new OpenRequest(url, null, DryRun: false, "test"), bridge));
+
+        Assert.IsNotNull(launched);
+        var link = new Uri(launched);
+        Assert.IsTrue(link.IsLoopback);
+        Assert.AreEqual(helper.Port, link.Port);
+        using var browser = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
+        using var first = await browser.GetAsync(link);
+        Assert.AreEqual(HttpStatusCode.Found, first.StatusCode);
+        Assert.AreEqual(url, first.Headers.Location?.OriginalString);
+        using var reused = await browser.GetAsync(link);
+        Assert.AreEqual(HttpStatusCode.NotFound, reused.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task ClosedSessionEndsTheRelayEvenBeforeTheApplicationStartsListening()
+    {
+        const string session = "ended-session";
+        var requests = new ConcurrentQueue<string>();
+        await using var helper = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request =>
+        {
+            requests.Enqueue($"{request.Method} {request.Target.Split('?')[0]}");
+            return Task.FromResult(new HttpResponse(404, [], []));
+        });
+        using var bridge = ControlClient.ForPort(helper.Port);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        await Relay.RunAsync(bridge, session, FreePort(), stop.Token);
+
+        Assert.IsFalse(stop.IsCancellationRequested);
+        CollectionAssert.AreEqual(new[] { $"GET /v1/sessions/{session}/next", $"POST /v1/sessions/{session}/close" }, requests.ToArray());
     }
 
     [TestMethod]
@@ -139,15 +225,18 @@ public sealed class RelayTests
         }
     }
 
-    private static Helper StartHelper()
+    private static Helper StartHelper(Action<string>? openBrowser = null)
     {
-        var helper = new Helper(_ => Assert.Fail("Dry runs do not open a browser."), () => [], () => null);
+        var helper = new Helper(openBrowser ?? (_ => Assert.Fail("Dry runs do not open a browser.")), () => [], () => null);
         helper.Start(0);
         return helper;
     }
 
-    private static OpenRequest Open(int port) =>
-        new($"https://login.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A{port}", port, DryRun: true, "test");
+    private static Bridge.Connection Connect(Helper helper) =>
+        new(ControlClient.ForPort(helper.Port), new(Protocol.Version, Environment.ProcessId, 0, [], "test PC"), DateTime.UtcNow);
+
+    private static OpenRequest Open(int port, bool includeState = true) =>
+        new($"https://login.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A{port}" + (includeState ? "&state=test" : ""), port, DryRun: true, "test");
 
     private static int FreePort()
     {
