@@ -17,13 +17,12 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private const uint WmTrayCallback = 0x8001; // WM_APP + 1
     private const uint NinSelect = 0x0400, NinKeySelect = 0x0401;
     private const uint NimAdd = 0, NimModify = 1, NimDelete = 2, NimSetVersion = 4;
-    private const int OpenLogCommand = 1, ExitCommand = 2, UpdateCommand = 3, AboutCommand = 4;
 
     // Window procedures are static, and the helper shows a single icon.
     private static TrayIcon? s_current;
 
     private readonly Func<TunnelStatus[]> _tunnels;
-    private readonly Func<bool> _updateAvailable;
+    private readonly TrayMenu _menu;
     private readonly Action _exit;
     private readonly TrayNotification _notification;
     private readonly Thread _thread;
@@ -35,13 +34,12 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private Process? _updater;
     private bool _canThemeMenus = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362);
 
-    private bool CanUpdate => _updater is null && _updateAvailable();
-
     private TrayIcon(Func<TunnelStatus[]> tunnels, Func<bool> updateAvailable, Action exit)
     {
         _tunnels = tunnels;
-        _updateAvailable = updateAvailable;
         _exit = exit;
+        _menu = new TrayMenu(OpenLog, () => _updater is null && updateAvailable(), StartUpdate,
+            () => AboutDialog.Show(_window, GetModuleHandleW(null)), () => PostMessageW(_window, WmClose, 0, 0));
         _notification = new TrayNotification(tip => Notify(NimModify, tip), name => Notify(NimAdd, name));
         _thread = new Thread(Run) { IsBackground = true, Name = "Tray icon" };
         _thread.SetApartmentState(ApartmentState.STA);
@@ -189,22 +187,15 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         SetForegroundWindow(popup); // Raise the open dialog, or let a click elsewhere dismiss the menu.
         if (popup != _window)
             return;
-        var menu = CreateMenu();
+        ApplyMenuTheme();
+        var items = _menu.Open();
+        var menu = CreatePopupMenu();
+        for (var i = 0; i < items.Count; i++)
+            AppendMenuW(menu, 0, (nuint)(i + 1), items[i].Label);
         var command = TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0); // TPM_RETURNCMD | TPM_RIGHTBUTTON
         DestroyMenu(menu);
-        RunCommand(command);
-    }
-
-    private nint CreateMenu()
-    {
-        ApplyMenuTheme();
-        var menu = CreatePopupMenu();
-        AppendMenuW(menu, 0, OpenLogCommand, "Open log");
-        if (CanUpdate)
-            AppendMenuW(menu, 0, UpdateCommand, "Update");
-        AppendMenuW(menu, 0, AboutCommand, "About");
-        AppendMenuW(menu, 0, ExitCommand, "Exit");
-        return menu;
+        if (command > 0 && command <= items.Count)
+            items[command - 1].Invoke();
     }
 
     private void ApplyMenuTheme()
@@ -225,20 +216,17 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         }
     }
 
-    private void RunCommand(int command)
+    private static void OpenLog()
     {
-        if (command == OpenLogCommand && Log.FilePath is { } log)
+        if (Log.FilePath is { } log)
             Process.Start(new ProcessStartInfo(log) { UseShellExecute = true })?.Dispose();
-        else if (command == UpdateCommand && CanUpdate)
-        {
-            // The updater must outlive this helper, which it stops before replacing the files.
-            var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
-            _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
-        }
-        else if (command == AboutCommand)
-            AboutDialog.Show(_window, GetModuleHandleW(null));
-        else if (command == ExitCommand)
-            PostMessageW(_window, WmClose, 0, 0);
+    }
+
+    private void StartUpdate()
+    {
+        // The updater must outlive this helper, which it stops before replacing the files.
+        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
+        _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
     }
 
     /// <summary>The tooltip, which Windows limits to 127 characters, and the icon color.</summary>
