@@ -10,22 +10,22 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
 {
     private readonly CancellationTokenSource _stopping = new();
     private readonly Lock _gate = new();
-    private Process? _ssh;
     private bool _clientChecked;
 
     public TunnelStatus Status { get; private set; } = new(target.Name, "starting", "", DateTimeOffset.Now);
 
     public void Start() => _ = RunAsync();
 
-    public void Dispose()
+    public void Dispose() => _stopping.Cancel();
+
+    private static void StopSsh(Process ssh)
     {
-        _stopping.Cancel();
         try
         {
             // The remote command removes its socket once its input closes.
-            _ssh?.StandardInput.Close();
-            if (_ssh?.WaitForExit(5000) == false)
-                _ssh.Kill();
+            ssh.StandardInput.Close();
+            if (!ssh.WaitForExit(5000))
+                ssh.Kill();
         }
         catch (Exception e) when (e is InvalidOperationException or IOException or Win32Exception)
         {
@@ -47,17 +47,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
             SetStatus("connecting");
             try
             {
-                using var ssh = _ssh = Process.Start(Processes.StartInfo("ssh", arguments))!;
-                var stderr = ssh.StandardError.ReadToEndAsync();
-                var exited = ssh.WaitForExitAsync();
-                if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(5))) != exited)
-                {
-                    SetStatus("connected");
-                    if (!_clientChecked)
-                        _ = UpdateClientAsync();
-                }
-                await exited;
-                errors = await stderr;
+                errors = await ConnectOnceAsync(arguments);
             }
             catch (Win32Exception e)
             {
@@ -69,7 +59,7 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
             SetStatus("disconnected", errors.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "ssh exited");
             if (errors.Contains("remote port forwarding failed"))
                 await PrepareRemoteDirectoryAsync();
-            delay = uptime.Elapsed > TimeSpan.FromMinutes(1) ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 60));
+            delay = NextRetryDelay(delay, uptime.Elapsed);
             try
             {
                 await Task.Delay(delay, _stopping.Token);
@@ -80,6 +70,26 @@ internal sealed class Tunnel(Target target, int controlPort) : IDisposable
             }
         }
         SetStatus("stopped");
+    }
+
+    internal static TimeSpan NextRetryDelay(TimeSpan previous, TimeSpan uptime) =>
+        uptime > TimeSpan.FromMinutes(1) ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(Math.Min(previous.TotalSeconds * 2, 60));
+
+    private async Task<string> ConnectOnceAsync(string[] arguments)
+    {
+        using var ssh = Process.Start(Processes.StartInfo("ssh", arguments))!;
+        // Register on this specific process, including when shutdown raced with Process.Start.
+        using var stop = _stopping.Token.Register(() => StopSsh(ssh));
+        var stderr = ssh.StandardError.ReadToEndAsync();
+        var exited = ssh.WaitForExitAsync();
+        if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(5))) != exited && !_stopping.IsCancellationRequested)
+        {
+            SetStatus("connected");
+            if (!_clientChecked)
+                _ = UpdateClientAsync();
+        }
+        await exited;
+        return await stderr;
     }
 
     private async Task PrepareRemoteDirectoryAsync()
