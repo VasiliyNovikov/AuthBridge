@@ -25,14 +25,13 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private readonly Func<TunnelStatus[]> _tunnels;
     private readonly Func<bool> _updateAvailable;
     private readonly Action _exit;
+    private readonly TrayNotification _notification;
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _created = new();
     private readonly uint _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
     private nint _window;
     private nint _icon;
-    private string _tip = "";
     private uint _color;
-    private bool _shown;
     private Process? _updater;
     private bool _canThemeMenus = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362);
 
@@ -43,6 +42,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         _tunnels = tunnels;
         _updateAvailable = updateAvailable;
         _exit = exit;
+        _notification = new TrayNotification(tip => Notify(NimModify, tip), name => Notify(NimAdd, name));
         _thread = new Thread(Run) { IsBackground = true, Name = "Tray icon" };
         _thread.SetApartmentState(ApartmentState.STA);
     }
@@ -132,7 +132,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
                     if (message == tray._taskbarCreated)
                     {
                         // Explorer restarted, and its new notification area has no icons.
-                        tray._shown = false;
+                        tray._notification.Invalidate();
                         tray.Refresh();
                     }
                     break;
@@ -154,18 +154,17 @@ internal sealed unsafe partial class TrayIcon : IDisposable
             finished.Dispose();
             _updater = null;
         }
-        var (tip, color) = Describe(_tunnels());
-        if (_shown && tip == _tip && color == _color)
-            return;
-        if (color != _color)
+        var status = Describe(_tunnels());
+        if (status.Color != _color)
         {
+            var icon = CreateStatusIcon(status.Color);
+            if (icon == 0)
+                throw new InvalidOperationException("could not create the tray status icon");
             DestroyIcon(_icon);
-            _icon = CreateStatusIcon(color);
+            _icon = icon;
+            _color = status.Color;
         }
-        (_tip, _color) = (tip, color);
-        // Adding is needed when there is no icon yet, for example while Explorer starts. Windows remembers the first
-        // tooltip as the icon's name, so the icon is added with the name alone.
-        _shown = Notify(NimModify, tip) || (Notify(NimAdd, "AuthBridge") && Notify(NimModify, tip));
+        _notification.Publish(status);
     }
 
     private bool Notify(uint operation, string tip = "")
