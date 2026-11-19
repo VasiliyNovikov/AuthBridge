@@ -15,24 +15,25 @@ public sealed class HostCommandTests
             actions.Add(command);
             return Task.FromResult(0);
         }
-        var cli = new HostCommandLine(new Dictionary<string, Func<Task<int>>>
+        var cli = new HostCommandLine(() => Record("status"), (_, _) => Record("install-remote"), (_, _) => Record("remote"))
         {
-            ["status"] = () => Record("status"),
-            ["update"] = () => Record("update"),
-        }, (_, _) => Record("install-remote"), (_, _) => Record("remote"));
+            Cli.Command("update", "", () => Record("update")),
+        };
 
-        Assert.AreEqual(0, await cli.RunAsync([]));
-        Assert.AreEqual(1, await cli.RunAsync(["update", "unexpected"]));
-        Assert.AreEqual(1, await cli.RunAsync(["install-remote", "dev"]));
-        Assert.AreEqual(1, await cli.RunAsync(["nonexistent"]));
-        Assert.AreEqual(0, await cli.RunAsync(["update"]));
+        Assert.AreEqual(0, await Cli.InvokeAsync(cli, []));
+        Assert.AreEqual(1, await Cli.InvokeAsync(cli, ["update", "unexpected"]));
+        Assert.AreEqual(1, await Cli.InvokeAsync(cli, ["install-remote", "dev"]));
+        Assert.AreEqual(1, await Cli.InvokeAsync(cli, ["nonexistent"]));
+        Assert.AreEqual(1, await Cli.InvokeAsync(cli, ["--version", "update"]));
+        Assert.AreEqual(0, await Cli.InvokeAsync(cli, ["update"]));
         CollectionAssert.AreEqual(new[] { "status", "update" }, actions.ToArray());
     }
 
     [TestMethod]
-    [DataRow("install-remote", 17)]
-    [DataRow("remote", 23)]
-    public async Task RemoteCommandsPreserveArgumentsAndReturnTheHandlersExitCode(string verb, int expected)
+    [DataRow("install-remote", "-p", 17)]
+    [DataRow("remote", "--help", 23)]
+    [DataRow("remote", "--", 23)]
+    public async Task RemoteCommandsPreserveArgumentsAndReturnTheHandlersExitCode(string verb, string first, int expected)
     {
         var received = new List<string>();
         int Record(string target, string[] arguments, int exitCode)
@@ -41,10 +42,10 @@ public sealed class HostCommandTests
             received.AddRange(arguments);
             return exitCode;
         }
-        var cli = new HostCommandLine(new Dictionary<string, Func<Task<int>>>(),
+        var cli = new HostCommandLine(() => Task.FromResult(0),
             (target, args) => Task.FromResult(Record(target, args, 17)), (target, args) => Task.FromResult(Record(target, args, 23)));
-        string[] arguments = ["dev", "-p", "8422", "argument with spaces", ""];
-        Assert.AreEqual(expected, await cli.RunAsync([verb, .. arguments]));
+        string[] arguments = ["dev", first, "8422", "argument with spaces", "", "--version", "@response", "--"];
+        Assert.AreEqual(expected, await Cli.InvokeAsync(cli, [verb, .. arguments]));
         CollectionAssert.AreEqual(arguments, received.ToArray());
     }
 

@@ -9,17 +9,14 @@ namespace AuthBridge.Host;
 [SupportedOSPlatform("windows")]
 internal static partial class HostCommands
 {
-    private static readonly HostCommandLine Commands = new(new Dictionary<string, Func<Task<int>>>(StringComparer.Ordinal)
+    public static HostCommandLine CreateCommand() => new(StatusAsync, InstallRemoteAsync, RemoteAsync)
     {
-        ["status"] = StatusAsync,
-        ["serve"] = HelperHost.RunAsync,
-        ["start"] = () => StartAsync(AppContext.BaseDirectory),
-        ["stop"] = StopAsync,
-        ["install"] = InstallAsync,
-        ["update"] = UpdateAsync,
-    }, InstallRemoteAsync, RemoteAsync);
-
-    public static Task<int> RunAsync(string[] args) => Commands.RunAsync(args);
+        Cli.Command("serve", "Run the helper in the foreground.", HelperHost.RunAsync),
+        Cli.Command("start", "Start the background helper.", () => StartAsync(AppContext.BaseDirectory)),
+        Cli.Command("stop", "Stop the background helper.", StopAsync),
+        Cli.Command("install", "Install for this user, start the helper now and at logon, and add it to PATH.", InstallAsync),
+        Cli.Command("update", "Install the latest release; Linux clients get it when they connect.", UpdateAsync),
+    };
 
     private static HelperControl Control => new(PingAsync, Console.Out, Console.Error);
     private static Task<int> StatusAsync() => Control.StatusAsync(Protocol.ControlPort);

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime.Versioning;
 using AuthBridge.Common;
 
@@ -8,37 +7,14 @@ namespace AuthBridge.Client;
 [SupportedOSPlatform("linux")]
 internal static class ClientCommands
 {
-    private const string Usage = """
-        Usage (Linux):
-          authbridge URL...       open URLs in the Windows browser (set as $BROWSER)
-          authbridge --status     check the connection to the Windows helper
-          authbridge --env        print the command that sets BROWSER: eval "$(authbridge --env)"
-          authbridge --setup-shell | --setup-gcm | --setup-nuget | --setup-all
-        """;
-
-    public static Task<int> RunAsync(string[] args) => args switch
-    {
-        ["--status"] => StatusAsync(),
-        ["--env"] => Task.FromResult(Setup.Env()),
-        ["--setup-shell"] => Task.FromResult(Setup.Shell()),
-        ["--setup-gcm"] => Setup.GcmAsync(),
-        ["--setup-nuget"] => Task.FromResult(Setup.NuGet()),
-        ["--setup-all"] => Setup.AllAsync(),
-        ["--gcm", var program, .. var rest] => Wrappers.GcmAsync(program, rest),
-        ["--nuget-plugin", .. var rest] => Wrappers.NuGetPluginAsync(rest),
-        [BrowserClient.RelayCommand or BrowserClient.CancelCommand, ..] => RunWorkerAsync(args),
-        _ => OpenAllAsync(args),
-    };
-
-    private static Task<int> RunWorkerAsync(string[] args) => args switch
-    {
-        [BrowserClient.RelayCommand, var socket, var session, var port] when TryPort(port, out var number) => RelayAsync(socket, session, number),
-        [BrowserClient.CancelCommand, var port, var url, var reason] when TryPort(port, out var number) => CancelAsync(number, url, reason),
-        _ => Task.FromResult(Program.Fail("authbridge: invalid background worker arguments")),
-    };
-
-    private static bool TryPort(string value, out int port) =>
-        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535;
+    public static ClientCommandLine CreateCommand() => new(OpenAllAsync, Wrappers.GcmAsync, Wrappers.NuGetPluginAsync,
+        RelayAsync, CancelAsync,
+        Cli.Command("--status", "Show the connections to Windows helpers.", StatusAsync),
+        Cli.Command("--env", "Print the command that sets BROWSER in this shell.", Setup.Env),
+        Cli.Command("--setup-shell", "Set BROWSER in new shells.", Setup.Shell),
+        Cli.Command("--setup-gcm", "Set up Git Credential Manager.", Setup.GcmAsync),
+        Cli.Command("--setup-nuget", "Set up the Azure Artifacts credential provider.", Setup.NuGet),
+        Cli.Command("--setup-all", "Set up the shell and all installed integrations.", Setup.AllAsync));
 
     private static async Task<int> StatusAsync()
     {
@@ -56,12 +32,8 @@ internal static class ClientCommands
         return 0;
     }
 
-    private static async Task<int> OpenAllAsync(string[] args)
+    private static async Task<int> OpenAllAsync(string[] urls, bool dryRun)
     {
-        var urls = args.Where(arg => arg != "--dry-run").ToArray();
-        if (urls.Length == 0 || urls.Any(arg => arg.StartsWith('-')))
-            return Program.Fail(Usage);
-        var dryRun = urls.Length != args.Length;
         Log.Init("client.log");
         var browser = new BrowserClient(StartWorker, Console.Error);
         var result = 0;

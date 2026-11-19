@@ -1,6 +1,6 @@
+using System.CommandLine;
 using System.ComponentModel;
 using AuthBridge.Client;
-using AuthBridge.Common;
 using AuthBridge.Host;
 
 namespace AuthBridge;
@@ -11,16 +11,17 @@ internal static class Program
     {
         try
         {
-            if (args is ["--version"])
-            {
-                Console.WriteLine(AppVersion.Informational);
-                return 0;
-            }
+            RootCommand root;
             if (OperatingSystem.IsWindows())
-                return await HostCommands.RunAsync(args);
-            if (OperatingSystem.IsLinux())
-                return await ClientCommands.RunAsync(args);
-            return Fail("authbridge runs on Windows (helper) and Linux (client).");
+                root = HostCommands.CreateCommand();
+            else if (OperatingSystem.IsLinux())
+                root = ClientCommands.CreateCommand();
+            else
+            {
+                root = new RootCommand();
+                root.SetAction(_ => Fail("authbridge runs on Windows (helper) and Linux (client)."));
+            }
+            return await Cli.InvokeAsync(root, args);
         }
         catch (Exception e) when (e is Win32Exception or IOException or UnauthorizedAccessException or HttpRequestException)
         {

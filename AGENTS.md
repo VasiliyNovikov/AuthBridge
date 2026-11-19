@@ -74,8 +74,8 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   related behavior together, and make control flow easy to follow.
 - Apply SOLID principles pragmatically: give each component a clear responsibility and make its dependencies explicit.
   Add an interface or layer only when it makes a concrete change easier to implement or test.
-- Use only the base class library. Serialize through the source-generated `Json` context in `Common/Protocol.cs`, and
-  register new types there.
+- Use System.CommandLine for the CLI and otherwise use only the base class library. Serialize through the
+  source-generated `Json` context in `Common/Protocol.cs`, and register new types there.
 - Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version. When a tunnel
   first connects, the helper replaces an older client with the one in its package, and never downgrades one, so that
   helpers of different versions do not undo each other's updates.

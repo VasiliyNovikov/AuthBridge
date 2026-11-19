@@ -91,6 +91,8 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 
 ## Usage
 
+Run `authbridge --help` on either platform to see its commands and options.
+
 | Windows | |
 | --- | --- |
 | `authbridge install` | Install in `%LOCALAPPDATA%\Programs\AuthBridge`, start the helper now and at logon, and add `authbridge` to your `PATH`. |

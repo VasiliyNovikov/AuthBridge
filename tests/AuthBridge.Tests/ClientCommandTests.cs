@@ -6,6 +6,15 @@ namespace AuthBridge.Tests;
 [TestClass]
 public sealed class ClientCommandTests
 {
+    private static ClientCommandLine Commands(Func<string[], bool, Task<int>>? open = null,
+        Func<string, string[], Task<int>>? gcm = null, Func<string[], Task<int>>? nugetPlugin = null,
+        Func<string, string, int, Task<int>>? relay = null, Func<int, string, string, Task<int>>? cancel = null)
+    {
+        static Task<int> Unexpected() => throw new AssertFailedException("Unexpected command invocation.");
+        return new(open ?? ((_, _) => Unexpected()), gcm ?? ((_, _) => Unexpected()), nugetPlugin ?? (_ => Unexpected()),
+            relay ?? ((_, _, _) => Unexpected()), cancel ?? ((_, _, _) => Unexpected()), Cli.Command("--setup-shell", "", Unexpected));
+    }
+
     [TestMethod]
     [DoNotParallelize]
     public async Task VersionCommandPrintsTheFullBuildVersionWithoutContactingAHelper()
@@ -26,22 +35,21 @@ public sealed class ClientCommandTests
 
     [TestMethod]
     [DoNotParallelize]
+    [DataRow]
     [DataRow("--dryrun", "not-a-url")]
     [DataRow("--dry-run")]
+    [DataRow("https://example.com", "--setup-shell")]
+    [DataRow("--dry-run", "--setup-shell")]
+    [DataRow("--setup-shell", "extra")]
     public async Task BrowserOptionsFailBeforeTryingToOpenAnything(params string[] args)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            Assert.Inconclusive("Linux client command.");
-            return;
-        }
         var previous = Console.Error;
         using var errors = new StringWriter();
         try
         {
             Console.SetError(errors);
-            Assert.AreEqual(1, await Program.Main(args));
-            StringAssert.Contains(errors.ToString(), "Usage (Linux)");
+            Assert.AreEqual(1, await Cli.InvokeAsync(Commands(), args));
+            StringAssert.Contains(errors.ToString(), "Usage:");
         }
         finally
         {
@@ -50,14 +58,61 @@ public sealed class ClientCommandTests
     }
 
     [TestMethod]
+    public async Task BrowserReceivesUrlsInOrderAndDryRunSeparately()
+    {
+        string[] urls = ["https://first.example", "https://second.example"];
+        var cli = Commands(open: (arguments, dryRun) =>
+        {
+            CollectionAssert.AreEqual(urls, arguments);
+            return Task.FromResult(dryRun ? 13 : 7);
+        });
+        Assert.AreEqual(13, await Cli.InvokeAsync(cli, [urls[0], "--dry-run", urls[1]]));
+        Assert.AreEqual(7, await Cli.InvokeAsync(cli, urls));
+    }
+
+    [TestMethod]
+    [DataRow]
+    [DataRow("--help", "--version", "-Plugin", "with spaces", "", "@response", "--")]
+    [DataRow("--", "payload")]
+    public async Task WrappersPassArgumentsVerbatim(params string[] arguments)
+    {
+        var cli = Commands(gcm: (program, rest) =>
+        {
+            Assert.AreEqual("/bin/git credential", program);
+            CollectionAssert.AreEqual(arguments, rest);
+            return Task.FromResult(17);
+        }, nugetPlugin: rest =>
+        {
+            CollectionAssert.AreEqual(arguments, rest);
+            return Task.FromResult(23);
+        });
+        Assert.AreEqual(17, await Cli.InvokeAsync(cli, ["--gcm", "/bin/git credential", .. arguments]));
+        Assert.AreEqual(23, await Cli.InvokeAsync(cli, ["--nuget-plugin", .. arguments]));
+    }
+
+    [TestMethod]
     [DataRow("__relay", "socket", "session-id", "invalid")]
     [DataRow("__cancel", "65536", "https://login.example/", "reason")]
     [DataRow("__cancel", "0")]
+    [DataRow("__relay", "socket", "session-id")]
     public async Task MalformedWorkersFailWithoutOpeningABrowserOrDetaching(params string[] args)
     {
-        if (OperatingSystem.IsLinux())
-            Assert.AreEqual(1, await ClientCommands.RunAsync(args));
-        else
-            Assert.Inconclusive("Linux client command.");
+        Assert.AreEqual(1, await Cli.InvokeAsync(Commands(), args));
+    }
+
+    [TestMethod]
+    public async Task WorkersReceiveTheTypedPortAndTheirOwnArguments()
+    {
+        var cli = Commands(relay: (socket, session, port) =>
+        {
+            Assert.AreEqual(("socket", "session-id", 65535), (socket, session, port));
+            return Task.FromResult(17);
+        }, cancel: (port, url, reason) =>
+        {
+            Assert.AreEqual((1, "https://login.example/", "not connected"), (port, url, reason));
+            return Task.FromResult(23);
+        });
+        Assert.AreEqual(17, await Cli.InvokeAsync(cli, ["__relay", "socket", "session-id", "65535"]));
+        Assert.AreEqual(23, await Cli.InvokeAsync(cli, ["__cancel", "1", "https://login.example/", "not connected"]));
     }
 }

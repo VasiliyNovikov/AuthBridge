@@ -1,26 +1,30 @@
+using System.CommandLine;
+
 namespace AuthBridge.Host;
 
 /// <summary>Routes the Windows CLI without doing any process, registry, or SSH work while parsing arguments.</summary>
-internal sealed class HostCommandLine(IReadOnlyDictionary<string, Func<Task<int>>> local,
-    Func<string, string[], Task<int>> installRemote, Func<string, string[], Task<int>> remote)
+internal sealed class HostCommandLine : RootCommand
 {
-    private const string Usage = """
-        Usage (Windows):
-          authbridge install            install for this user, start the helper now and at logon, and add it to PATH
-          authbridge install-remote NAME [SSH OPTIONS...] DESTINATION
-                                        install the client on a Linux machine and keep a tunnel to it
-          authbridge remote NAME ARGS...
-                                        run the client on that machine, e.g. remote devbox --setup-gcm
-          authbridge update             install the latest release; Linux machines get it when they connect
-          authbridge start | stop | status | serve
-        """;
-
-    public Task<int> RunAsync(string[] args) => args switch
+    public HostCommandLine(Func<Task<int>> status, Func<string, string[], Task<int>> installRemote,
+        Func<string, string[], Task<int>> remote) : base("Manage the AuthBridge Windows helper and its Linux clients.")
     {
-        [] => local["status"](),
-        [var name] when local.TryGetValue(name, out var command) => command(),
-        ["install-remote", var name, .. var ssh] when ssh.Length > 0 => installRemote(name, ssh),
-        ["remote", var name, .. var arguments] when arguments.Length > 0 => remote(name, arguments),
-        _ => Task.FromResult(Program.Fail(Usage)),
-    };
+        var statusCommand = Cli.Command("status", "Show the helper and tunnel status (the default command).", status);
+        Action = statusCommand.Action;
+        Add(statusCommand);
+        Add(RemoteCommand("install-remote", "Install the Linux client and keep a tunnel to it.", "ssh-arguments",
+            "SSH options followed by the destination.", installRemote));
+        Add(RemoteCommand("remote", "Run the client on a configured Linux machine.", "arguments",
+            "Arguments to the Linux client, for example --status.", remote));
+    }
+
+    private static Command RemoteCommand(string verb, string description, string argumentName, string argumentDescription,
+        Func<string, string[], Task<int>> run)
+    {
+        var name = new Argument<string>("name") { Description = "Name of the Linux machine." };
+        var arguments = Cli.ForwardedArguments(argumentName, ArgumentArity.OneOrMore);
+        arguments.Description = argumentDescription;
+        var command = new Command(verb, description) { name, arguments };
+        command.SetAction((result, _) => run(result.GetRequiredValue(name), result.GetRequiredValue(arguments)));
+        return command;
+    }
 }

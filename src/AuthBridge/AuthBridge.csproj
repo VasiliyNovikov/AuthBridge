@@ -17,6 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="3.0.0" />
     <!-- The tray icon adds a status dot to its images. -->
     <EmbeddedResource Include="AuthBridge.ico" LogicalName="AuthBridge.ico" />
     <InternalsVisibleTo Include="AuthBridge.Tests" />
