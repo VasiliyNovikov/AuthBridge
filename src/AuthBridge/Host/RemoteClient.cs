@@ -6,18 +6,24 @@ namespace AuthBridge.Host;
 internal static class RemoteClient
 {
     /// <summary>A remote machine's architecture, home directory, and client version, which is null without a client.</summary>
-    public sealed record Machine(string Architecture, string Home, string? Version);
+    public sealed record Machine(string Architecture, string Home, string? Version)
+    {
+        internal static Machine Parse(string output)
+        {
+            var lines = output.TrimEnd('\r', '\n').Split('\n', StringSplitOptions.TrimEntries);
+            if (lines.Length < 2 || lines[0].Length == 0 || !lines[1].StartsWith('/'))
+                throw new IOException("cannot query the remote machine: expected its architecture and absolute home directory");
+            var architecture = lines[0] switch { "x86_64" => "x64", "aarch64" or "arm64" => "arm64", var machine => machine };
+            return new(architecture, lines[1], lines.Length > 2 ? AppVersion.WithoutMetadata(lines[2]) : null);
+        }
+    }
 
     public static async Task<Machine> ProbeAsync(IEnumerable<string> ssh)
     {
         // A client that cannot tell its version counts as version 0, which any release replaces.
         var probe = await Ssh.RunAsync(ssh, "uname -m; echo \"$HOME\"; " +
             "if [ -x ~/.local/bin/authbridge ]; then ~/.local/bin/authbridge --version 2>/dev/null || echo 0; fi");
-        var lines = probe.OutputOrThrow("cannot query the remote machine").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (lines.Length < 2 || !lines[1].StartsWith('/'))
-            throw new IOException("cannot query the remote machine: expected its architecture and absolute home directory");
-        var architecture = lines[0] switch { "x86_64" => "x64", "aarch64" or "arm64" => "arm64", var machine => machine };
-        return new(architecture, lines[1], lines.Length > 2 ? AppVersion.WithoutMetadata(lines[2]) : null);
+        return Machine.Parse(probe.OutputOrThrow("cannot query the remote machine"));
     }
 
     /// <summary>Installs the client that matches this helper.</summary>

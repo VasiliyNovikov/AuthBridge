@@ -15,6 +15,16 @@ public sealed class UpdaterTests
     public void ComparesReleaseNumbers(string version, string than, bool newer) => Assert.AreEqual(newer, AppVersion.IsNewer(version, than));
 
     [TestMethod]
+    [DataRow("x86_64\n/home/dev\n1.2.3+build\n", "x64", "1.2.3")]
+    [DataRow("aarch64\r\n/home/dev\r\n", "arm64", null)]
+    public void RemoteProbeIdentifiesTheClientPackageAndInstalledVersion(string output, string architecture, string? version) =>
+        Assert.AreEqual(new RemoteClient.Machine(architecture, "/home/dev", version), RemoteClient.Machine.Parse(output));
+
+    [TestMethod]
+    public void IncompleteRemoteProbeDoesNotShiftFields() =>
+        Assert.ThrowsExactly<IOException>(() => RemoteClient.Machine.Parse("x86_64\n\n/unexpected-third-line\n"));
+
+    [TestMethod]
     public async Task OffersOnlyConfirmedUpdatesAndCachesTheCheck()
     {
         var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
