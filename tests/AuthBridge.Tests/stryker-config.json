@@ -1,8 +1,11 @@
 {
   "stryker-config": {
     "test-runner": "mtp",
-    "mutate": ["Common/OAuth.cs"],
-    "test-case-filter": "FullyQualifiedName~AuthBridge.Tests.OAuthTests",
+    "mutate": [
+      "Common/OAuth.cs",
+      "Common/Http.cs"
+    ],
+    "test-case-filter": "TestCategory=Mutation",
     "concurrency": 2,
     "reporters": ["html", "json"]
   }

@@ -4,6 +4,7 @@ using AuthBridge.Common;
 namespace AuthBridge.Tests;
 
 [TestClass]
+[TestCategory("Mutation")]
 public sealed class OAuthTests
 {
     [TestMethod]

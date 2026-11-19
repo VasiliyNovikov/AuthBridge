@@ -12,6 +12,35 @@ namespace AuthBridge.Tests;
 public sealed class RelayTests
 {
     [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task ReadsOnlyTheDeclaredCallbackBody()
+    {
+        using var wire = new MemoryStream("POST /callback?x=1 HTTP/1.1\r\ncontent-length: 4\r\nX-Note: a:b\r\n\r\nbodyextra"u8.ToArray());
+
+        var request = await Http.ReadRequestAsync(wire, CancellationToken.None);
+
+        Assert.AreEqual(("POST", "/callback?x=1", "a:b", "body"),
+            (request.Method, request.Target, request.GetHeader("x-note"), Encoding.UTF8.GetString(request.Body)));
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task HeadResponseReframesTheContentLengthWithoutSendingTheBody()
+    {
+        using var wire = new MemoryStream();
+        var response = new HttpResponse(200, [new("Content-Length", "99"), new("X-Note", "kept")], "body"u8.ToArray());
+
+        await Http.WriteResponseAsync(wire, response, includeBody: false, CancellationToken.None);
+
+        var parts = Encoding.Latin1.GetString(wire.ToArray()).Split("\r\n\r\n");
+        Assert.HasCount(2, parts);
+        Assert.AreEqual("", parts[1]);
+        var lines = parts[0].Split("\r\n");
+        Assert.AreEqual("HTTP/1.1 200 OK", lines[0]);
+        CollectionAssert.AreEquivalent(new[] { "X-Note: kept", "Content-Length: 4", "Connection: close" }, lines[1..]);
+    }
+
+    [TestMethod]
     public async Task PingReportsLiveHostStateFromTheFirstRequest()
     {
         TunnelStatus[] tunnels = [new("dev", "connected", "", DateTimeOffset.UtcNow)];

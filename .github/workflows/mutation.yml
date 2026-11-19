@@ -1,4 +1,4 @@
-name: OAuth mutation testing
+name: Mutation testing
 
 on:
   workflow_dispatch:
@@ -16,20 +16,22 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet tool restore
-      - name: Run OAuth mutation tests
+      - name: Run mutation tests
         working-directory: tests/AuthBridge.Tests
         run: dotnet stryker
-      - name: Verify the reports and at least one killed OAuth mutant
+      - name: Verify the reports and at least one killed mutant per target
         working-directory: tests/AuthBridge.Tests
         run: |
           test -s StrykerOutput/*/reports/mutation-report.html
-          jq -e 'any(.files | to_entries[];
-            (.key | endswith("Common/OAuth.cs")) and any(.value.mutants[]; .status == "Killed")
-          )' StrykerOutput/*/reports/mutation-report.json
+          jq -er --slurpfile config stryker-config.json '
+            .files | to_entries as $files | $config[0]["stryker-config"].mutate[] as $target
+            | [$files[] | select(("/" + .key) | endswith("/" + $target)) | .value.mutants[] | select(.status == "Killed")] | length
+            | if . > 0 then "\($target): \(.) killed" else error("No killed mutants in \($target)") end
+          ' StrykerOutput/*/reports/mutation-report.json
       - name: Upload mutation reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: oauth-mutation-reports
+          name: mutation-reports
           path: tests/AuthBridge.Tests/StrykerOutput/*/reports/
           if-no-files-found: error
