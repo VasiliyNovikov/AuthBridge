@@ -27,7 +27,6 @@ internal static class AboutTheme
 internal sealed unsafe partial class AboutDialog
 {
     private const uint DarkBackground = 0x202020;
-    private const uint WmInitDialog = 0x0110;
     private readonly nint _backgroundBrush;
     private bool _dark;
 
@@ -42,8 +41,9 @@ internal sealed unsafe partial class AboutDialog
         try
         {
             var dialog = new AboutDialog(brush);
+            var procedure = new AboutDialogProcedure(dialog.ApplyTheme, dialog.BackgroundFor, (window, result) => EndDialog(window, result));
             fixed (ushort* template = CreateTemplate())
-                if (DialogBoxIndirectParamW(instance, template, owner, dialog.HandleMessage, 0) == -1)
+                if (DialogBoxIndirectParamW(instance, template, owner, procedure.Handle, 0) == -1)
                     throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
         finally
@@ -86,32 +86,13 @@ internal sealed unsafe partial class AboutDialog
         return [.. words];
     }
 
-    private nint HandleMessage(nint dialog, uint message, nint wParam, nint lParam)
+    private nint BackgroundFor(nint dc)
     {
-        try
-        {
-            switch (message)
-            {
-                case WmInitDialog:
-                case 0x0015 or 0x001A or 0x031A: // WM_SYSCOLORCHANGE, WM_SETTINGCHANGE, WM_THEMECHANGED
-                    ApplyTheme(dialog);
-                    return message == WmInitDialog ? 1 : 0;
-                case 0x0136 or 0x0138 when _dark: // WM_CTLCOLORDLG, WM_CTLCOLORSTATIC
-                    SetTextColor(wParam, 0xF5F5F5);
-                    SetBkColor(wParam, DarkBackground);
-                    return _backgroundBrush;
-                case 0x0111 when (ushort)wParam is 1 or 2: // WM_COMMAND: Enter or Esc
-                case 0x0010: // WM_CLOSE
-                    EndDialog(dialog, 1);
-                    return 1;
-            }
-        }
-        catch (Exception e)
-        {
-            Log.Error(e, "About dialog failed");
-            EndDialog(dialog, 0);
-        }
-        return 0;
+        if (!_dark)
+            return 0; // Use Windows' light or high-contrast palette.
+        SetTextColor(dc, 0xF5F5F5);
+        SetBkColor(dc, DarkBackground);
+        return _backgroundBrush;
     }
 
     private void ApplyTheme(nint dialog)

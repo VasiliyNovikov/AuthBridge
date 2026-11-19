@@ -7,6 +7,38 @@ namespace AuthBridge.Tests;
 public sealed class TrayTests
 {
     [TestMethod]
+    public void OpenAboutDialogReappliesTheThemeAndLetsWindowsPaintSystemColors()
+    {
+        var darkPreference = true;
+        var dark = false;
+        const int window = 7, dc = 8, darkBrush = 9;
+        var procedure = new AboutDialogProcedure(
+            dialog => { Assert.AreEqual((nint)window, dialog); dark = darkPreference; },
+            context => { Assert.AreEqual((nint)dc, context); return dark ? darkBrush : 0; },
+            (_, _) => Assert.Fail("Changing themes must not close About."));
+
+        Assert.AreEqual((nint)1, procedure.Handle(window, 0x0110, 0, 0)); // WM_INITDIALOG: set default focus
+        Assert.AreEqual((nint)darkBrush, procedure.Handle(window, 0x0138, dc, 0)); // static icon or text
+        darkPreference = false;
+        Assert.AreEqual((nint)0, procedure.Handle(window, 0x001A, 0, 0)); // WM_SETTINGCHANGE
+        Assert.AreEqual((nint)0, procedure.Handle(window, 0x0136, dc, 0)); // dialog background
+    }
+
+    [TestMethod]
+    [DataRow(0x0010, 0, 0)] // title-bar Close
+    [DataRow(0x0111, 2, 0)] // Esc
+    [DataRow(0x0111, 1, 123)] // button click
+    public void AboutDismissesOnCloseButNotOnUnrelatedControlNotifications(int message, int command, int control)
+    {
+        var ended = new List<(nint Window, int Result)>();
+        var procedure = new AboutDialogProcedure(_ => { }, _ => 0, (window, result) => ended.Add((window, result)));
+        Assert.AreEqual((nint)0, procedure.Handle(42, 0x0111, (6 << 16) | 2, 123)); // BN_SETFOCUS on IDCANCEL
+        Assert.IsEmpty(ended);
+        Assert.AreEqual((nint)1, procedure.Handle(42, (uint)message, command, control));
+        Assert.AreEqual(((nint)42, 1), ended.Single());
+    }
+
+    [TestMethod]
     public void AboutKeepsSystemColorsForHighContrastOrUnreadablePreferences()
     {
         Assert.IsFalse(AboutTheme.UseDarkPalette(() => true, () => throw new InvalidOperationException("Do not read app colors in high contrast.")));
