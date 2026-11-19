@@ -15,6 +15,21 @@ internal sealed class InstalledPackage(string location)
 
     public string Location { get; } = location;
 
+    private string ConsoleExecutable => Path.Combine(Location, "authbridge.exe");
+    private string? WindowlessExecutable
+    {
+        get
+        {
+            var path = Path.Combine(Location, "authbridgew.exe");
+            return File.Exists(path) ? path : null;
+        }
+    }
+
+    public string HelperExecutable => WindowlessExecutable ?? ConsoleExecutable;
+
+    // At logon the console executable must start a detached helper, whereas the GUI executable can serve directly.
+    public string LogonCommand => WindowlessExecutable is { } gui ? $"\"{gui}\" serve" : $"\"{ConsoleExecutable}\" start";
+
     /// <summary>Installs a release package downloaded from GitHub.</summary>
     public void Install(byte[] package)
     {

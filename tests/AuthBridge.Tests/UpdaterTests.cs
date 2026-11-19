@@ -98,4 +98,26 @@ public sealed class UpdaterTests
             directory.Delete(recursive: true);
         }
     }
+
+    [TestMethod]
+    public void LogonRunsTheGuiHelperDirectlyOrDetachesThroughTheConsoleExecutable()
+    {
+        var folder = Directory.CreateTempSubdirectory("authbridge launch ");
+        try
+        {
+            var package = new InstalledPackage(folder.FullName);
+            var console = Path.Combine(folder.FullName, "authbridge.exe");
+            Assert.AreEqual(console, package.HelperExecutable);
+            Assert.AreEqual($"\"{console}\" start", package.LogonCommand);
+
+            var gui = Path.Combine(folder.FullName, "authbridgew.exe");
+            File.WriteAllBytes(gui, []);
+            Assert.AreEqual(gui, package.HelperExecutable);
+            Assert.AreEqual($"\"{gui}\" serve", package.LogonCommand);
+        }
+        finally
+        {
+            folder.Delete(recursive: true);
+        }
+    }
 }

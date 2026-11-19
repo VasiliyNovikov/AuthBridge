@@ -20,9 +20,6 @@ internal static partial class HostCommands
           authbridge start | stop | status | serve
         """;
 
-    /// <summary>The same program built as a GUI app, which runs the helper without a console window.</summary>
-    private const string Windowless = "authbridgew.exe";
-
     public static Task<int> RunAsync(string[] args) => args switch
     {
         [] or ["status"] => StatusAsync(),
@@ -49,8 +46,7 @@ internal static partial class HostCommands
         foreach (var standardHandle in StandardHandles)
             SetHandleInformation(GetStdHandle(standardHandle), HandleFlagInherit, 0);
         // Redirected streams detach the helper from this console.
-        var windowless = Path.Combine(folder, Windowless);
-        var helper = Processes.StartInfo(File.Exists(windowless) ? windowless : Path.Combine(folder, "authbridge.exe"), ["serve"]);
+        var helper = Processes.StartInfo(new InstalledPackage(folder).HelperExecutable, ["serve"]);
         helper.WorkingDirectory = Paths.StateDir;
         Process.Start(helper)?.Dispose();
         for (var attempt = 0; attempt < 50; attempt++)
@@ -133,8 +129,7 @@ internal static partial class HostCommands
             installation.InstallFrom(AppContext.BaseDirectory);
             Console.WriteLine($"installed authbridge {AppVersion.Release} in {folder}");
         }
-        var windowless = Path.Combine(folder, Windowless);
-        var command = File.Exists(windowless) ? $"\"{windowless}\" serve" : $"\"{Path.Combine(folder, "authbridge.exe")}\" start";
+        var command = installation.LogonCommand;
         using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
             run.SetValue("authbridge", command);
         Console.WriteLine($"The helper starts at logon: {command}");
