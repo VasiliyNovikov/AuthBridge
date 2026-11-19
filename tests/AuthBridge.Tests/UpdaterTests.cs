@@ -25,6 +25,21 @@ public sealed class UpdaterTests
         Assert.ThrowsExactly<IOException>(() => RemoteClient.Machine.Parse("x86_64\n\n/unexpected-third-line\n"));
 
     [TestMethod]
+    public async Task UpdateWaitsForConnectedClientVersionsButNotOfflineMachines()
+    {
+        var online = new TunnelStatus("online", "starting", "", DateTimeOffset.UtcNow);
+        var offline = online with { Name = "offline", State = "disconnected" };
+        PingResult Status(TunnelStatus tunnel) => new(Protocol.Version, 1, 0, [tunnel, offline]);
+        var ready = Status(online with { State = "connected", Client = "1.2.3" });
+        var replies = new Queue<PingResult>([Status(online), Status(online with { State = "connected" }), ready]);
+
+        var last = await RemoteClient.WaitForChecksAsync(() => Task.FromResult<PingResult?>(replies.Dequeue()), TimeSpan.Zero);
+
+        Assert.AreSame(ready, last);
+        Assert.IsEmpty(replies);
+    }
+
+    [TestMethod]
     public async Task OffersOnlyConfirmedUpdatesAndCachesTheCheck()
     {
         var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -26,6 +26,20 @@ internal static class RemoteClient
         return Machine.Parse(probe.OutputOrThrow("cannot query the remote machine"));
     }
 
+    /// <summary>After an update, wait for connected clients to report their version; offline clients catch up later.</summary>
+    public static async Task<PingResult?> WaitForChecksAsync(Func<Task<PingResult?>> ping, TimeSpan interval)
+    {
+        PingResult? info = null;
+        for (var attempt = 0; attempt < 45; attempt++)
+        {
+            await Task.Delay(interval);
+            info = await ping();
+            if (info is null || info.Tunnels.All(tunnel => tunnel.State == "disconnected" || (tunnel.State == "connected" && tunnel.Client.Length > 0)))
+                break;
+        }
+        return info;
+    }
+
     /// <summary>Installs the client that matches this helper.</summary>
     public static async Task UploadAsync(IEnumerable<string> ssh, string architecture)
     {

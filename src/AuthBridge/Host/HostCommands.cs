@@ -112,14 +112,7 @@ internal static partial class HostCommands
         Console.WriteLine($"updated {installation.Location} from {AppVersion.Release} to {latest}");
         if (await StartAsync(installation.Location) != 0)
             return 1;
-        PingResult? info = null;
-        for (var attempt = 0; attempt < 45; attempt++)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            info = await PingAsync();
-            if (info is null || info.Tunnels.All(tunnel => tunnel.State == "connected" ? tunnel.Client.Length > 0 : tunnel.State == "disconnected"))
-                break;
-        }
+        var info = await RemoteClient.WaitForChecksAsync(PingAsync, TimeSpan.FromSeconds(2));
         var status = await StatusAsync();
         if (info?.Tunnels.Any(tunnel => tunnel.State != "connected") == true)
             Console.WriteLine("Machines that are not connected get the new client when their tunnels connect.");
