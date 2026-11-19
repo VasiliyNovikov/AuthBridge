@@ -208,6 +208,7 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
     public void PrefersTheHelperOfThePcUsedMostRecently()
     {
         var now = DateTime.UtcNow;
@@ -227,6 +228,7 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
     public async Task DiscoveryStartsOneGracePeriodWithTheFirstAnswer()
     {
         using var first = new Bridge.Connection(ControlClient.ForPort(1), new(Protocol.Version, 1, 0, []), DateTime.UtcNow);
@@ -252,6 +254,7 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
     public async Task DiscoveryNeverDeletesAnExplicitSocketPath()
     {
         var temp = Directory.CreateTempSubdirectory("ab-");
