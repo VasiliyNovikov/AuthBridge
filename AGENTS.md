@@ -9,6 +9,7 @@ Requires the .NET 11 SDK (pinned in `global.json`).
 ```shell
 dotnet test              # builds and runs the tests (MSTest on Microsoft.Testing.Platform)
 dotnet crap.cs           # runs the Release tests with coverage and checks the whole-app CRAP load
+dotnet coupling.cs       # reports class coupling and checks the highest production type count
 dotnet release.cs 1.2.3  # self-contained, single-file, trimmed binaries and release zips in ./artifacts
 ```
 
@@ -35,6 +36,18 @@ can offset regressions elsewhere, so use the method report to see what changed.
 
 To tighten the ceiling after an improvement, copy the new Linux x64 load into the baseline in a reviewed change.
 CI never rewrites it. Other platforms can run the same command, but their test coverage can differ.
+
+### Class coupling
+
+`dotnet coupling.cs` measures Roslyn's [class coupling](https://learn.microsoft.com/visualstudio/code-quality/code-metrics-class-coupling)
+for each named type in the Release compilation of `src/AuthBridge`, including nested types. Roslyn counts distinct
+referenced types, including framework and library types; repeated references count once. Generated members of a
+partial type count toward that type (notably the `Json` serialization context). Tests and build scripts are not measured.
+
+The Ubuntu x64 job prints the ten highest counts and uploads `artifacts/coupling/report.json` as `class-coupling`,
+with the count and dependency names for every type. A maximum equal to `maxClassCoupling` in `coupling-baseline.json`
+passes; any higher count blocks CI and tagged releases. Lower the ceiling in a reviewed change after an improvement.
+The Roslyn packages are used only by the script, not by the shipped executable.
 
 ### Mutation testing
 
