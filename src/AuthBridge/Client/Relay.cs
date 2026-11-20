@@ -26,68 +26,104 @@ internal static class Relay
     /// </summary>
     public static async Task RunAsync(ControlClient bridge, string session, int port, CancellationToken cancel, Func<Task<ControlClient?>>? reconnect = null)
     {
-        var name = $"session {session[..8]}";
-        Log.Info($"{name}: relaying to localhost:{port}");
-        var current = bridge;
+        await using var helper = new HelperSession(bridge, session, reconnect, TimeSpan.FromSeconds(2));
+        Log.Info($"{helper.Name}: relaying to localhost:{port}");
         var elapsed = Stopwatch.StartNew();
-        var listened = false;
-        var failures = 0;
+        var window = new ListenerWindow();
         try
         {
-            while (elapsed.Elapsed < TimeSpan.FromMinutes(30))
+            while (!ListenerWindow.Expired(elapsed.Elapsed))
             {
-                if (IsListening(port))
-                    listened = true;
-                else if (listened || elapsed.Elapsed > TimeSpan.FromMinutes(1))
+                if (!window.CanContinue(IsListening(port), elapsed.Elapsed))
                 {
-                    Log.Info($"{name}: nothing listens on localhost:{port} any more");
+                    Log.Info($"{helper.Name}: nothing listens on localhost:{port} any more");
                     return;
                 }
 
-                (bool Closed, PendingRequest? Request) next;
-                try
-                {
-                    next = await current.NextAsync(session, PollSeconds, cancel);
-                    failures = 0;
-                }
-                catch (Exception e) when (e is HttpRequestException || e is OperationCanceledException && !cancel.IsCancellationRequested)
-                {
-                    Log.Warn($"{name}: helper unreachable: {e.Message}");
-                    if (++failures >= 15)
-                        return;
-                    await Task.Delay(TimeSpan.FromSeconds(2), cancel);
-                    if (reconnect is not null && await reconnect() is { } reconnected)
-                    {
-                        if (current != bridge)
-                            current.Dispose();
-                        current = reconnected;
-                    }
-                    continue;
-                }
-                if (next.Closed)
-                {
-                    Log.Info($"{name}: ended by the helper");
+                if (!await helper.PollAsync(port, cancel))
                     return;
-                }
-                if (next.Request is { } pending)
-                    await current.ReplyAsync(session, pending.Id, await ForwardAsync(port, pending.Request, cancel), cancel);
             }
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
         }
-        finally
+    }
+
+    /// <summary>A browser launcher may exit before the app starts listening. Once seen, a listener must stay up.</summary>
+    internal sealed class ListenerWindow
+    {
+        private bool _seen;
+
+        public static bool Expired(TimeSpan elapsed) => elapsed >= TimeSpan.FromMinutes(30);
+
+        public bool CanContinue(bool listening, TimeSpan elapsed)
+        {
+            if (listening)
+                _seen = true;
+            return listening || (!_seen && elapsed <= TimeSpan.FromMinutes(1));
+        }
+    }
+
+    /// <summary>The caller owns the initial connection; the session owns any replacements.</summary>
+    internal sealed class HelperSession(ControlClient initial, string id, Func<Task<ControlClient?>>? reconnect, TimeSpan retryDelay) : IAsyncDisposable
+    {
+        private readonly ControlClient _initial = initial;
+        private ControlClient _current = initial;
+        private int _failures;
+        public string Name { get; } = $"session {id[..8]}";
+
+        public async Task<bool> PollAsync(int port, CancellationToken cancel)
+        {
+            (bool Closed, PendingRequest? Request) next;
+            try
+            {
+                next = await _current.NextAsync(id, PollSeconds, cancel);
+                _failures = 0;
+            }
+            catch (Exception e) when (IsUnreachable(e, cancel))
+            {
+                Log.Warn($"{Name}: helper unreachable: {e.Message}");
+                return await RetryAsync(cancel);
+            }
+            if (next.Closed)
+            {
+                Log.Info($"{Name}: ended by the helper");
+                return false;
+            }
+            if (next.Request is { } pending)
+                await _current.ReplyAsync(id, pending.Id, await ForwardAsync(port, pending.Request, cancel), cancel);
+            return true;
+        }
+
+        private async Task<bool> RetryAsync(CancellationToken cancel)
+        {
+            if (++_failures >= 15)
+                return false;
+            await Task.Delay(retryDelay, cancel);
+            if (reconnect is not null && await reconnect() is { } replacement)
+            {
+                if (_current != _initial && _current != replacement)
+                    _current.Dispose();
+                _current = replacement;
+            }
+            return true;
+        }
+
+        public async ValueTask DisposeAsync()
         {
             try
             {
-                await current.CloseAsync(session);
+                await _current.CloseAsync(id);
             }
             catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
             {
                 // The helper closes idle sessions itself.
             }
-            if (current != bridge)
-                current.Dispose();
+            finally
+            {
+                if (_current != _initial)
+                    _current.Dispose();
+            }
         }
     }
 
@@ -119,12 +155,15 @@ internal static class Relay
             return HttpResponse.Html(502, "Sign-in no longer awaited",
                 $"The application on {Environment.MachineName} stopped waiting for this sign-in (nothing listens on localhost:{port}). You can close this tab.");
         }
-        catch (Exception e) when (e is HttpRequestException || e is OperationCanceledException && !cancel.IsCancellationRequested)
+        catch (Exception e) when (IsUnreachable(e, cancel))
         {
             Log.Warn($"{description} failed: {e.Message}");
             return HttpResponse.Html(502, "Sign-in relay failed", $"Could not reach the application on {Environment.MachineName} (localhost:{port}): {e.Message}");
         }
     }
+
+    private static bool IsUnreachable(Exception error, CancellationToken cancel) =>
+        error is HttpRequestException || (error is OperationCanceledException && !cancel.IsCancellationRequested);
 
     private static bool IsListening(int port) =>
         IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(endpoint => endpoint.Port == port);

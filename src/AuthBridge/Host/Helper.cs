@@ -95,6 +95,11 @@ internal sealed class Helper(Action<string> openBrowser, Func<TunnelStatus[]> tu
             }
             _sessions[session.Id] = session;
         }
+        return await OpenBrowserAsync(request, session);
+    }
+
+    private async Task<HttpResponse> OpenBrowserAsync(OpenRequest request, RelaySession? session)
+    {
         if (!request.DryRun)
         {
             try

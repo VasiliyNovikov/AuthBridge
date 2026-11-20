@@ -7,6 +7,23 @@ namespace AuthBridge.Tests;
 public sealed class TrayTests
 {
     [TestMethod]
+    public void TrayRoutesSelectionRestartAndShutdownWithoutSwallowingWindowClose()
+    {
+        var calls = new List<string>();
+        const uint taskbarCreated = 0xC123;
+        var procedure = new TrayWindowProcedure(taskbarCreated, () => calls.Add("refresh"),
+            (x, y) => calls.Add($"menu {x} {y}"), () => calls.Add("close"), () => calls.Add("quit"), () => calls.Add("invalidate"));
+
+        Assert.IsTrue(procedure.Handle(0x0113, 0, 0)); // WM_TIMER
+        Assert.IsTrue(procedure.Handle(0x8001, (-20 << 16) | 0xFFF6, (1 << 16) | 0x0401)); // keyboard selection on a secondary monitor
+        Assert.IsFalse(procedure.Handle(0x8001, 0, 0x0200)); // mouse movement
+        Assert.IsFalse(procedure.Handle(taskbarCreated, 0, 0));
+        Assert.IsFalse(procedure.Handle(0x0010, 0, 0)); // let Windows destroy the window
+        Assert.IsTrue(procedure.Handle(0x0002, 0, 0));
+        CollectionAssert.AreEqual(new[] { "refresh", "menu -10 -20", "invalidate", "refresh", "close", "quit" }, calls.ToArray());
+    }
+
+    [TestMethod]
     public void OpenAboutDialogReappliesTheThemeAndLetsWindowsPaintSystemColors()
     {
         var darkPreference = true;

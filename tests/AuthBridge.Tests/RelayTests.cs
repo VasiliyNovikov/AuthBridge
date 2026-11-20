@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using AuthBridge.Client;
 using AuthBridge.Common;
 using AuthBridge.Host;
@@ -15,12 +16,68 @@ public sealed class RelayTests
     [TestCategory("Mutation")]
     public async Task ReadsOnlyTheDeclaredCallbackBody()
     {
-        using var wire = new MemoryStream("POST /callback?x=1 HTTP/1.1\r\ncontent-length: 4\r\nX-Note: a:b\r\n\r\nbodyextra"u8.ToArray());
+        const string Head = "POST /callback?x=1 HTTP/1.1\r\ncontent-length: 4\r\nX-Note: a:b\r\n\r\n";
+        using var wire = new LimitedReadStream(Encoding.ASCII.GetBytes(Head + "bodyextra"), Head.Length + 2);
 
         var request = await Http.ReadRequestAsync(wire, CancellationToken.None);
 
         Assert.AreEqual(("POST", "/callback?x=1", "a:b", "body"),
             (request.Method, request.Target, request.GetHeader("x-note"), Encoding.UTF8.GetString(request.Body)));
+        Assert.AreEqual(Head.Length + 4, wire.Position);
+    }
+
+    private sealed class LimitedReadStream(byte[] bytes, int limit) : MemoryStream(bytes)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancel = default) =>
+            base.ReadAsync(buffer[..Math.Min(buffer.Length, limit)], cancel);
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    [DataRow("GET\r\n\r\n", "request line")]
+    [DataRow("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", "Chunked")]
+    [DataRow("POST / HTTP/1.1\r\nContent-Length: -1\r\n\r\n", "body length")]
+    public async Task ReaderRejectsRequestsItCannotFrame(string head, string reason)
+    {
+        using var stream = new MemoryStream(Encoding.ASCII.GetBytes(head));
+        var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(() => Http.ReadRequestAsync(stream, CancellationToken.None));
+        StringAssert.Contains(error.Message, reason);
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task ReaderDistinguishesAnIncompleteHeaderFromAnOversizedOne()
+    {
+        using var incomplete = new MemoryStream("GET / HTTP/1.1\r\n"u8.ToArray());
+        using var oversized = new MemoryStream(new byte[64 << 10]);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        await Assert.ThrowsExactlyAsync<EndOfStreamException>(() => Http.ReadRequestAsync(incomplete, stop.Token));
+        var error = await Assert.ThrowsExactlyAsync<InvalidDataException>(() => Http.ReadRequestAsync(oversized, stop.Token));
+        StringAssert.Contains(error.Message, "headers");
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task ReaderAcceptsEmptyBodiesAndTheExactMaximumBodySize()
+    {
+        const int maximum = 16 << 20;
+        foreach (var size in new[] { 0, maximum })
+        {
+            var head = Encoding.ASCII.GetBytes($"POST / HTTP/1.1\r\nContent-Length: {size}\r\n\r\n");
+            using var request = new MemoryStream(head.Length + size);
+            request.Write(head);
+            request.SetLength(head.Length + size);
+            request.Position = 0;
+            Assert.AreEqual(size, (await Http.ReadRequestAsync(request, CancellationToken.None)).Body.Length);
+        }
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public void CallbackQueryDecodesNamesAndValuesWithoutIncludingTheFragment()
+    {
+        CollectionAssert.AreEqual(new[] { ("flag", ""), ("", "value"), ("client name", "a=b") },
+            Http.Query("?flag&&=value&client+name=a%3Db#&ignored").ToArray());
     }
 
     [TestMethod]
@@ -28,7 +85,11 @@ public sealed class RelayTests
     public async Task HeadResponseReframesTheContentLengthWithoutSendingTheBody()
     {
         using var wire = new MemoryStream();
-        var response = new HttpResponse(200, [new("Content-Length", "99"), new("X-Note", "kept")], "body"u8.ToArray());
+        var response = new HttpResponse(200, [
+            new("Content-Length", "99"), new("Connection", "keep-alive"), new("Keep-Alive", "timeout=5"),
+            new("Proxy-Connection", "keep-alive"), new("Transfer-Encoding", "chunked"), new("TE", "trailers"),
+            new("Trailer", "Expires"), new("Upgrade", "h2c"), new("X-Note", "kept"),
+        ], "body"u8.ToArray());
 
         await Http.WriteResponseAsync(wire, response, includeBody: false, CancellationToken.None);
 
@@ -46,16 +107,71 @@ public sealed class RelayTests
     {
         const string Form = "application/x-www-form-urlencoded";
         await using var application = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(
-            (request.Method, request.Target, request.GetHeader("Content-Type")) == ("POST", "/callback", Form)
-                ? new HttpResponse(303, [new("Location", "/done")], request.Body, "Continue sign-in")
+            (request.Method, request.Target, request.GetHeader("Content-Type"), request.GetHeader("Host")) == ("POST", "/callback", Form, "localhost:7512")
+                ? new HttpResponse(303, [new("Location", "/done"), new("Content-Type", "text/plain")], request.Body, "Continue sign-in")
                 : new HttpResponse(404, [], [])));
-        var callback = new HttpRequest("POST", "/callback", [new("Content-Type", Form)], "state=ok"u8.ToArray());
+        var callback = new HttpRequest("POST", "/callback", [new("Content-Type", Form), new("Host", "localhost:7512")], "state=ok"u8.ToArray());
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
         var response = await Relay.ForwardAsync(application.Port, callback, stop.Token);
 
         Assert.AreEqual((303, "Continue sign-in", "/done"), (response.Status, response.Reason, Http.Find(response.Headers, "Location")));
+        Assert.AreEqual("text/plain", Http.Find(response.Headers, "Content-Type"));
         CollectionAssert.AreEqual(callback.Body, response.Body);
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task RelayForwardsOnlyTheCookiesOfTheCurrentBrowserRequest()
+    {
+        const string cookie = "authbridge-test=cookie";
+        await using var application = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request =>
+            Task.FromResult(new HttpResponse(200, [new("Set-Cookie", cookie)], Encoding.UTF8.GetBytes(request.GetHeader("Cookie") ?? ""))));
+        var request = new HttpRequest("GET", "/callback", [], []);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var first = await Relay.ForwardAsync(application.Port, request with { Headers = [new("Cookie", "browser=first")] }, stop.Token);
+        Assert.AreEqual("browser=first", Encoding.UTF8.GetString(first.Body));
+        Assert.AreEqual(cookie, Http.Find(first.Headers, "Set-Cookie"));
+        var second = await Relay.ForwardAsync(application.Port, request, stop.Token);
+        Assert.AreEqual(200, second.Status);
+        Assert.IsEmpty(second.Body);
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task AClosedCallbackPortReturnsABrowserErrorButCallerCancellationPropagates()
+    {
+        var port = FreePort();
+        var request = new HttpRequest("GET", "/callback", [], []);
+        var response = await Relay.ForwardAsync(port, request, CancellationToken.None);
+        Assert.AreEqual(502, response.Status);
+        Assert.AreEqual("text/html; charset=utf-8", Http.Find(response.Headers, "Content-Type"));
+        var page = Encoding.UTF8.GetString(response.Body);
+        StringAssert.Contains(page, "<title>Sign-in no longer awaited</title>");
+        StringAssert.Contains(page, $"localhost:{port}");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => Relay.ForwardAsync(port, request, new CancellationToken(canceled: true)));
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task IncompleteApplicationResponseReturnsARelayErrorInsteadOfAPartialSignInPage()
+    {
+        using var application = new TcpListener(IPAddress.Loopback, 0);
+        application.Start();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var port = ((IPEndPoint)application.LocalEndpoint).Port;
+        var forward = Relay.ForwardAsync(port, new HttpRequest("POST", "/callback", [], "data"u8.ToArray()), stop.Token);
+        using (var peer = await application.AcceptTcpClientAsync(stop.Token))
+        {
+            var stream = peer.GetStream();
+            await Http.ReadRequestAsync(stream, stop.Token);
+            await stream.WriteAsync("HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nx"u8.ToArray(), stop.Token);
+        }
+        var response = await forward;
+        Assert.AreEqual(502, response.Status);
+        var html = Encoding.UTF8.GetString(response.Body);
+        StringAssert.Contains(html, "<title>Sign-in relay failed</title>");
+        StringAssert.Contains(html, $"localhost:{port}");
     }
 
     [TestMethod]
@@ -95,6 +211,7 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
     [DataRow(false)]
     [DataRow(true)]
     public async Task RelaysTheBrowserRedirectToTheApplication(bool tunnelReconnects)
@@ -114,16 +231,21 @@ public sealed class RelayTests
         var worker = workers.Single();
         var session = worker[2];
         CollectionAssert.AreEqual(new[] { "__relay", bridge.Client.Endpoint, session, relayPort.ToString() }, worker);
-        using var stop = new CancellationTokenSource();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var relay = Relay.RunAsync(tunnelReconnects ? dropped : bridge.Client, session, application.Port, stop.Token,
             () => Task.FromResult<ControlClient?>(ControlClient.ForPort(helper.Port)));
         using var browser = new HttpClient();
-        using var response = await browser.PostAsync($"http://localhost:{relayPort}/callback?x=1", new StringContent("code=c&state=s"));
-
-        Assert.AreEqual("POST /callback?x=1 code=c&state=s", await response.Content.ReadAsStringAsync());
-        CollectionAssert.AreEqual(new[] { "a=1", "b=2" }, response.Headers.GetValues("Set-Cookie").ToArray());
-        await stop.CancelAsync();
-        await relay;
+        try
+        {
+            using var response = await browser.PostAsync($"http://localhost:{relayPort}/callback?x=1", new StringContent("code=c&state=s"), stop.Token);
+            Assert.AreEqual("POST /callback?x=1 code=c&state=s", await response.Content.ReadAsStringAsync());
+            CollectionAssert.AreEqual(new[] { "a=1", "b=2" }, response.Headers.GetValues("Set-Cookie").ToArray());
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            await relay.WaitAsync(TimeSpan.FromSeconds(10));
+        }
     }
 
     [TestMethod]
@@ -189,6 +311,7 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [TestCategory("Mutation")]
     public async Task ClosedSessionEndsTheRelayEvenBeforeTheApplicationStartsListening()
     {
         const string session = "ended-session";
@@ -196,7 +319,7 @@ public sealed class RelayTests
         await using var helper = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request =>
         {
             requests.Enqueue($"{request.Method} {request.Target.Split('?')[0]}");
-            return Task.FromResult(new HttpResponse(404, [], []));
+            return Task.FromResult(new HttpResponse(requests.Count == 1 ? 204 : 404, [], []));
         });
         using var bridge = ControlClient.ForPort(helper.Port);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -204,7 +327,78 @@ public sealed class RelayTests
         await Relay.RunAsync(bridge, session, FreePort(), stop.Token);
 
         Assert.IsFalse(stop.IsCancellationRequested);
-        CollectionAssert.AreEqual(new[] { $"GET /v1/sessions/{session}/next", $"POST /v1/sessions/{session}/close" }, requests.ToArray());
+        CollectionAssert.AreEqual(new[] { $"GET /v1/sessions/{session}/next", $"GET /v1/sessions/{session}/next",
+            $"POST /v1/sessions/{session}/close" }, requests.ToArray());
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public void RelayAllowsStartupGraceButNotAStoppedListenerOrAnExpiredSession()
+    {
+        var window = new Relay.ListenerWindow();
+        var grace = TimeSpan.FromMinutes(1);
+        Assert.IsTrue(window.CanContinue(false, grace));
+        Assert.IsFalse(window.CanContinue(false, grace + TimeSpan.FromTicks(1)));
+        Assert.IsTrue(window.CanContinue(true, TimeSpan.Zero));
+        Assert.IsFalse(window.CanContinue(false, TimeSpan.FromSeconds(1)));
+        var lifetime = TimeSpan.FromMinutes(30);
+        Assert.IsFalse(Relay.ListenerWindow.Expired(lifetime - TimeSpan.FromTicks(1)));
+        Assert.IsTrue(Relay.ListenerWindow.Expired(lifetime));
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task RelayClosesTheHelperSessionAsSoonAsTheApplicationStopsListening()
+    {
+        using var application = new TcpListener(IPAddress.Loopback, 0);
+        application.Start();
+        var port = ((IPEndPoint)application.LocalEndpoint).Port;
+        var requests = new ConcurrentQueue<string>();
+        await using var helper = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request =>
+        {
+            requests.Enqueue(request.Method);
+            application.Stop();
+            return Task.FromResult(new HttpResponse(requests.Count == 1 ? 204 : 404, [], []));
+        });
+        using var bridge = ControlClient.ForPort(helper.Port);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Relay.RunAsync(bridge, "finished-session", port, stop.Token);
+        CollectionAssert.AreEqual(new[] { "GET", "POST" }, requests.ToArray());
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task SuccessfulPollResetsTheRetryBudgetAndOnlyReplacementClientsAreDisposed()
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var online = false;
+        await using var helper = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), _ =>
+            Volatile.Read(ref online) ? Task.FromResult(new HttpResponse(204, [], [])) : throw new IOException("tunnel disconnected"));
+        var port = helper.Port;
+        using var initial = ControlClient.ForPort(port);
+        using var restored = ControlClient.ForPort(port);
+        using var replacement = ControlClient.ForPort(port);
+        var retries = 0;
+        Task<ControlClient?> Reconnect() => Task.FromResult(++retries switch
+        {
+            14 => restored, 15 => restored, 16 => replacement, _ => (ControlClient?)null,
+        });
+        await using (var session = new Relay.HelperSession(initial, "retry-session", Reconnect, TimeSpan.Zero))
+        {
+            for (var i = 0; i < 14; i++)
+                Assert.IsTrue(await session.PollAsync(port, stop.Token));
+            Volatile.Write(ref online, true);
+            Assert.IsTrue(await session.PollAsync(port, stop.Token));
+            Assert.AreEqual(14, retries);
+            Volatile.Write(ref online, false);
+            for (var i = 0; i < 14; i++)
+                Assert.IsTrue(await session.PollAsync(port, stop.Token));
+            Assert.IsFalse(await session.PollAsync(port, stop.Token));
+            Assert.AreEqual(28, retries);
+            await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => restored.PingAsync(TimeSpan.FromSeconds(1)));
+        }
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => replacement.PingAsync(TimeSpan.FromSeconds(1)));
+        await Assert.ThrowsAsync<HttpRequestException>(() => initial.PingAsync(TimeSpan.FromSeconds(1)));
     }
 
     [TestMethod]
@@ -225,6 +419,27 @@ public sealed class RelayTests
         CollectionAssert.AreEqual(new[] { "office", "home", "newer, without idle time", "older, without idle time" }, order);
         foreach (var helper in helpers)
             helper.Dispose();
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task PreferredMatchStaysUsableAndDiscardedOrFaultedProbesReleaseTheirClients()
+    {
+        await using var helper = StartHelper();
+        var timeout = TimeSpan.FromSeconds(2);
+        using var first = Connect(helper);
+        using var owner = Connect(helper);
+        Assert.AreSame(owner, Bridge.TakePreferred([first, owner], info => ReferenceEquals(info, owner.Info)));
+        Assert.IsNotNull(await owner.Client.PingAsync(timeout));
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => first.Client.PingAsync(timeout));
+        Assert.AreSame(owner, Bridge.TakePreferred([owner], null));
+        Assert.IsNull(Bridge.TakePreferred([owner], _ => false));
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => owner.Client.PingAsync(timeout));
+
+        using var acquired = Connect(helper);
+        await Assert.ThrowsExactlyAsync<IOException>(() => Bridge.WaitForAnswersAsync(
+            [Task.FromResult<Bridge.Connection?>(acquired), Task.FromException<Bridge.Connection?>(new IOException("probe failed"))], () => { }));
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => acquired.Client.PingAsync(timeout));
     }
 
     [TestMethod]
@@ -273,6 +488,62 @@ public sealed class RelayTests
         {
             temp.Delete(recursive: true);
         }
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    public async Task DiscoveryFindsLiveUnixSocketsAndRemovesOnlyStaleManagedPaths()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("Linux tunnel sockets.");
+            return;
+        }
+        var temp = Directory.CreateTempSubdirectory("ab-");
+        try
+        {
+            var timeout = TimeSpan.FromSeconds(3);
+            var absent = Path.Combine(temp.FullName, "missing");
+            Assert.IsEmpty(await Bridge.FindAllAsync(absent, null, timeout));
+            var live = Path.Combine(temp.FullName, "bridge-live.sock");
+            var stale = Path.Combine(temp.FullName, "bridge-stale.sock");
+            var unrelated = Path.Combine(temp.FullName, "other.sock");
+            File.WriteAllText(stale, "");
+            File.WriteAllText(unrelated, "");
+            using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            listener.Bind(new UnixDomainSocketEndPoint(live));
+            listener.Listen();
+            using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            async Task<Bridge.Connection> Discover(string directory, string socketOverride)
+            {
+                var discovery = Bridge.FindAllAsync(directory, socketOverride, timeout);
+                await Task.WhenAll(discovery, AnswerPingAsync(listener, stop.Token));
+                return (await discovery).Single();
+            }
+            using var found = await Discover(temp.FullName, "");
+            Assert.AreEqual("test-helper", found.Info.Machine);
+            Assert.IsFalse(File.Exists(stale));
+            Assert.IsTrue(File.Exists(unrelated));
+
+            using var fromOverride = await Discover(absent, live);
+            var ping = fromOverride.Client.PingAsync(timeout);
+            await Task.WhenAll(ping, AnswerPingAsync(listener, stop.Token));
+            Assert.AreEqual("test-helper", (await ping)?.Machine);
+        }
+        finally
+        {
+            temp.Delete(recursive: true);
+        }
+    }
+
+    private static async Task AnswerPingAsync(Socket listener, CancellationToken cancel)
+    {
+        using var peer = await listener.AcceptAsync(cancel);
+        using var stream = new NetworkStream(peer);
+        var request = await Http.ReadRequestAsync(stream, cancel);
+        Assert.AreEqual("/v1/ping", request.Target);
+        var body = JsonSerializer.SerializeToUtf8Bytes(new PingResult(Protocol.Version, 1, 0, [], "test-helper"), Json.Default.PingResult);
+        await Http.WriteResponseAsync(stream, new HttpResponse(200, [], body), includeBody: true, cancel);
     }
 
     private static Helper StartHelper(Action<string>? openBrowser = null)

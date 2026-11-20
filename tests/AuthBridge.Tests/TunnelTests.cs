@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using AuthBridge.Common;
 using AuthBridge.Host;
 
@@ -7,6 +8,18 @@ namespace AuthBridge.Tests;
 [TestClass]
 public sealed class TunnelTests
 {
+    [TestMethod]
+    public void HostSettingsRoundTripTheExistingConfigFileFormat()
+    {
+        using var file = JsonDocument.Parse("""
+            { "targets": [{ "name": "dev", "ssh": ["-p","2222","dev"], "remoteDir": "/home/dev" }], "browserCommand": ["browser", "{url}"] }
+            """);
+        var config = file.RootElement.Deserialize(HostConfigJson.Default.HostConfig);
+        Assert.IsNotNull(config);
+        Assert.AreEqual("dev", config.Targets.Single().Name);
+        Assert.IsTrue(JsonElement.DeepEquals(file.RootElement, JsonSerializer.SerializeToElement(config, HostConfigJson.Default.HostConfig)));
+    }
+
     [TestMethod]
     public async Task StoppingATunnelClosesItsChildAndCompletesItsLifetime()
     {

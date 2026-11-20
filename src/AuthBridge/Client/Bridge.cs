@@ -17,9 +17,12 @@ internal static class Bridge
     }
 
     /// <summary>The preferred helper among those that <paramref name="match"/> accepts.</summary>
-    public static async Task<Connection?> FindAsync(TimeSpan timeout, Func<PingResult, bool>? match = null)
+    public static async Task<Connection?> FindAsync(TimeSpan timeout, Func<PingResult, bool>? match = null) =>
+        TakePreferred(await FindAllAsync(timeout), match);
+
+    /// <summary>Transfers the first matching connection to the caller and releases all other probes.</summary>
+    internal static Connection? TakePreferred(IReadOnlyList<Connection> connections, Func<PingResult, bool>? match)
     {
-        var connections = await FindAllAsync(timeout);
         var found = connections.FirstOrDefault(connection => match?.Invoke(connection.Info) ?? true);
         foreach (var other in connections.Where(connection => !ReferenceEquals(connection, found)))
             other.Dispose();

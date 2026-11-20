@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AuthBridge.Common;
 
 namespace AuthBridge.Host;
@@ -15,7 +16,7 @@ internal sealed record HostConfig(Target[] Targets, string[]? BrowserCommand = n
     {
         try
         {
-            var config = JsonSerializer.Deserialize(File.ReadAllBytes(FilePath), Json.Default.HostConfig);
+            var config = JsonSerializer.Deserialize(File.ReadAllBytes(FilePath), HostConfigJson.Default.HostConfig);
             return config is null ? new([]) : config with { Targets = config.Targets ?? [] };
         }
         catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
@@ -27,7 +28,11 @@ internal sealed record HostConfig(Target[] Targets, string[]? BrowserCommand = n
     public void Save()
     {
         Paths.EnsureStateDir();
-        File.WriteAllBytes(FilePath + ".tmp", JsonSerializer.SerializeToUtf8Bytes(this, Json.Default.HostConfig));
+        File.WriteAllBytes(FilePath + ".tmp", JsonSerializer.SerializeToUtf8Bytes(this, HostConfigJson.Default.HostConfig));
         File.Move(FilePath + ".tmp", FilePath, overwrite: true);
     }
 }
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web, WriteIndented = true)]
+[JsonSerializable(typeof(HostConfig))]
+internal sealed partial class HostConfigJson : JsonSerializerContext;

@@ -33,25 +33,31 @@ with the method scores and matching warnings, and `coverage.cobertura.xml`.
 The gate compares **total CRAP load**, not the sum or average of the method scores. A method's score is
 `complexity^2 * (1 - coverage)^3 + complexity`, where coverage is a fraction. Only methods scoring **above**
 `crapMethodThreshold` contribute load: `complexity * (1 - coverage) + complexity / threshold`. CI fails if their
-combined load, rounded to three decimal places, exceeds `maxTotalCrapLoad`. Improvements can offset regressions
-elsewhere, so use the method report to see what changed.
-
-To tighten the ceiling after an improvement, copy the new Linux x64 load into the baseline in a reviewed change.
-CI never rewrites it. Other platforms can run the same command, but their test coverage can differ.
+combined load, rounded to three decimal places, exceeds `maxTotalCrapLoad`.
+[Crap4DotNet](https://github.com/7Factor/crap4dotnet#what-is-crap) defaults to a per-method cutoff of 30; keep our
+stricter 25. The load ceiling is zero because no method currently exceeds the cutoff on Linux x64, not because
+there is a universal project-wide load target. CI never rewrites it. Other platforms' coverage can differ.
 
 ### Roslyn code metrics
 
-The production build and the CI report use the same Roslyn limits, initially set to the observed extremes on commit
-`a693d99`:
+The production build and the CI report use the same Roslyn limits:
 
-| Scope | Metric | Initial passing limit | `dotnet build` rule |
+| Scope | Metric | Passing limit | `dotnet build` rule |
 | --- | --- | ---: | --- |
-| Type | Class coupling (distinct referenced types, including library types) | at most 56 | CA1506 |
+| Type | Class coupling (distinct referenced types, including library types) | at most 54 | CA1506 |
 | Type | Depth of inheritance | at most 4 | CA1501 |
-| Method | Maintainability index | at least 46 | CA1505 |
-| Method | Cyclomatic complexity | at most 14 | CA1502 |
-| Method | Source lines (including blank lines) | at most 70 | CI only |
+| Method | Maintainability index | at least 48 | CA1505 |
+| Method | Cyclomatic complexity | at most 10 | CA1502 |
+| Method | Source lines (including blank lines) | at most 46 | CI only |
 | Method | Executable lines (Roslyn's estimate from operations) | at most 28 | CI only |
+
+[Microsoft's complexity guide](https://learn.microsoft.com/visualstudio/code-quality/code-metrics-cyclomatic-complexity)
+cites 10 as a starting point, not the SDK's looser warning default. The other limits track this project:
+the [coupling guide](https://learn.microsoft.com/visualstudio/code-quality/code-metrics-class-coupling) cites 9 in
+one study but explicitly rejects a universal cap; [inheritance guidance](https://learn.microsoft.com/visualstudio/code-quality/code-metrics-depth-of-inheritance)
+suggests roughly 5–6, already looser than 4. On Microsoft's [0–100 maintainability scale](https://learn.microsoft.com/visualstudio/code-quality/code-metrics-values)
+green starts at 20. The same guide defines both line counts but sets no numerical cutoff: use them alongside
+complexity, not as a reason to remove whitespace or comments.
 
 `src/AuthBridge/.globalconfig` enables the four SDK analyzers for the production project. MSBuild writes their
 limits to `CodeMetricsConfig.txt` under `obj` and passes it to the compiler as an additional file. Do not edit that
@@ -80,8 +86,8 @@ source files relative to `src/AuthBridge`. The Microsoft.Testing.Platform runner
 tests missed; the JSON report is in the same directory. To reproduce the POSIX quoting result, run on Linux:
 the test passes the quoted path through a real `sh` and is skipped on other platforms.
 
-The relay target exercises `ForwardAsync`. Stryker currently rolls back the mutations in `Relay.RunAsync` after a
-compile error, so the relay score does not measure its polling and reconnect loop.
+The relay target exercises forwarding, listener lifetime, session polling, reconnects and client ownership.
+Mutations Stryker cannot compile are reported separately and do not count as detected.
 
 The `mutation` job in `build.yml` runs on Ubuntu 24.04 x64 for pull requests, pushes to `main`, and `v*` tags.
 It uploads both reports as `mutation-reports`. A missing report, a target with no killed mutants, or an **overall
@@ -89,9 +95,9 @@ mutation score** below the `detectedMutants / validMutants` baseline fails the b
 There are no per-file score floors. To check a report from the repo root, run `dotnet check-mutation-score.cs <mutation-report.json>`.
 
 The gate compares the exact fraction of detected mutants (killed or timed out) among valid mutants (detected,
-survived, or not covered); the displayed percentages are rounded only for readability. The initial floor is
-102/167 (61.08%), the lower of the [main](https://github.com/VasiliyNovikov/AuthBridge/actions/runs/44584029259)
-and [tag](https://github.com/VasiliyNovikov/AuthBridge/actions/runs/44584029415) runs of the same `v0.1.21` commit.
+survived, or not covered); the displayed percentages are rounded only for readability. We enforce 80/100,
+[Stryker.NET's default "good" reporting threshold](https://stryker-mutator.io/docs/stryker-net/configuration/#threshold-high-number),
+not its default build-breaking threshold (zero). The baseline counts express a ratio, not a required mutant count.
 To raise the floor, update both counts in a reviewed change using repeatable Linux x64 results. CI never rewrites them.
 
 ## Layout
@@ -117,8 +123,8 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   related behavior together, and make control flow easy to follow.
 - Apply SOLID principles pragmatically: give each component a clear responsibility and make its dependencies explicit.
   Add an interface or layer only when it makes a concrete change easier to implement or test.
-- Use System.CommandLine for the CLI and otherwise use only the base class library. Serialize through the
-  source-generated `Json` context in `Common/Protocol.cs`, and register new types there.
+- Use System.CommandLine for the CLI and otherwise use only the base class library. Register wire types in the
+  source-generated `Json` context in `Common/Protocol.cs`; on-disk Windows settings use `HostConfigJson` in `Host/HostConfig.cs`.
 - Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version. When a tunnel
   first connects, the helper replaces an older client with the one in its package, and never downgrades one, so that
   helpers of different versions do not undo each other's updates.

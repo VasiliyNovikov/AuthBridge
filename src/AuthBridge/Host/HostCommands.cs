@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using AuthBridge.Common;
-using Microsoft.Win32;
 
 namespace AuthBridge.Host;
 
@@ -86,32 +85,8 @@ internal static partial class HostCommands
         var installation = InstalledPackage.CurrentUser;
         if (await installation.InstallFromAsync(AppContext.BaseDirectory, StopIfRunningAsync))
             Console.WriteLine($"installed authbridge {AppVersion.Release} in {installation.Location}");
-        RegisterForCurrentUser(installation);
+        UserRegistration.Register(installation);
         return await StartAsync(installation.Location);
-    }
-
-    private static void RegisterForCurrentUser(InstalledPackage installation)
-    {
-        var folder = installation.Location;
-        var command = installation.LogonCommand;
-        using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
-            run.SetValue("authbridge", command);
-        Console.WriteLine($"The helper starts at logon: {command}");
-
-        using var environment = Registry.CurrentUser.CreateSubKey("Environment");
-        // Unexpanded, so that entries such as %USERPROFILE%\bin keep working.
-        var path = environment.GetValue("Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
-        var updatedPath = installation.IncludeInUserPath(path);
-        if (updatedPath == path)
-            Console.WriteLine($"{folder} is already on your PATH");
-        else
-        {
-            var kind = path.Length > 0 ? environment.GetValueKind("Path") : RegistryValueKind.ExpandString;
-            environment.SetValue("Path", updatedPath, kind);
-            // Tells running programs such as Explorer, so that terminals started from now on see the new PATH.
-            SendMessageTimeout(HwndBroadcast, WmSettingChange, 0, "Environment", SmtoAbortIfHung, 5000, out _);
-            Console.WriteLine($"Added {folder} to your PATH; terminals started from now on can run 'authbridge'");
-        }
     }
 
     private static async Task<int> InstallRemoteAsync(string name, string[] ssh)
@@ -176,11 +151,4 @@ internal static partial class HostCommands
     [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SetHandleInformation(nint handle, uint mask, uint flags);
-
-    private const nint HwndBroadcast = 0xFFFF;
-    private const uint WmSettingChange = 0x001A;
-    private const uint SmtoAbortIfHung = 0x0002;
-
-    [LibraryImport("user32.dll", EntryPoint = "SendMessageTimeoutW", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial nint SendMessageTimeout(nint window, uint message, nint wParam, string lParam, uint flags, uint timeout, out nint result);
 }

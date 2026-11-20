@@ -13,9 +13,6 @@ namespace AuthBridge.Host;
 internal sealed unsafe partial class TrayIcon : IDisposable
 {
     private const string WindowClassName = "AuthBridgeTray";
-    private const uint WmDestroy = 0x0002, WmClose = 0x0010, WmContextMenu = 0x007B, WmTimer = 0x0113;
-    private const uint WmTrayCallback = 0x8001; // WM_APP + 1
-    private const uint NinSelect = 0x0400, NinKeySelect = 0x0401;
     private const uint NimAdd = 0, NimModify = 1, NimDelete = 2, NimSetVersion = 4;
 
     // Window procedures are static, and the helper shows a single icon.
@@ -27,7 +24,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private readonly TrayNotification _notification;
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _created = new();
-    private readonly uint _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
+    private readonly TrayWindowProcedure _procedure;
     private nint _window;
     private nint _icon;
     private uint _color;
@@ -39,8 +36,10 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         _tunnels = tunnels;
         _exit = exit;
         _menu = new TrayMenu(OpenLog, () => _updater is null && updateAvailable(), StartUpdate,
-            () => AboutDialog.Show(_window, GetModuleHandleW(null)), () => PostMessageW(_window, WmClose, 0, 0));
+            () => AboutDialog.Show(_window, GetModuleHandleW(null)), () => PostMessageW(_window, TrayWindowProcedure.CloseMessage, 0, 0));
         _notification = new TrayNotification(tip => Notify(NimModify, tip), name => Notify(NimAdd, name));
+        _procedure = new TrayWindowProcedure(RegisterWindowMessageW("TaskbarCreated"), Refresh, ShowMenu, OnClose,
+            () => PostQuitMessage(0), _notification.Invalidate);
         _thread = new Thread(Run) { IsBackground = true, Name = "Tray icon" };
         _thread.SetApartmentState(ApartmentState.STA);
     }
@@ -61,14 +60,14 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         for (nint window = 0; (window = FindWindowExW(0, window, WindowClassName, null)) != 0;)
         {
             if (GetWindowThreadProcessId(window, out var owner) != 0 && owner == processId)
-                requested |= PostMessageW(window, WmClose, 0, 0) != 0;
+                requested |= PostMessageW(window, TrayWindowProcedure.CloseMessage, 0, 0) != 0;
         }
         return requested;
     }
 
     public void Dispose()
     {
-        PostMessageW(_window, WmClose, 0, 0);
+        PostMessageW(_window, TrayWindowProcedure.CloseMessage, 0, 0);
         _thread.Join(TimeSpan.FromSeconds(5));
     }
 
@@ -109,32 +108,8 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     {
         try
         {
-            var tray = s_current!;
-            switch (message)
-            {
-                case WmTimer:
-                    tray.Refresh();
-                    return 0;
-                case WmTrayCallback when ((uint)lParam & 0xFFFF) is WmContextMenu or NinSelect or NinKeySelect:
-                    tray.ShowMenu((short)wParam, (short)(wParam >> 16));
-                    return 0;
-                case WmClose:
-                    tray.Notify(NimDelete);
-                    // Not on this thread, which the shutdown waits for.
-                    ThreadPool.QueueUserWorkItem(_ => tray._exit());
-                    break; // DefWindowProc destroys the window.
-                case WmDestroy:
-                    PostQuitMessage(0);
-                    return 0;
-                default:
-                    if (message == tray._taskbarCreated)
-                    {
-                        // Explorer restarted, and its new notification area has no icons.
-                        tray._notification.Invalidate();
-                        tray.Refresh();
-                    }
-                    break;
-            }
+            if (s_current!._procedure.Handle(message, wParam, lParam))
+                return 0;
         }
         catch (Exception e)
         {
@@ -143,15 +118,16 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         return DefWindowProcW(window, message, wParam, lParam);
     }
 
+    private void OnClose()
+    {
+        Notify(NimDelete);
+        // Shutdown waits for the window thread.
+        ThreadPool.QueueUserWorkItem(_ => _exit());
+    }
+
     private void Refresh()
     {
-        if (_updater is { HasExited: true } finished)
-        {
-            if (finished.ExitCode != 0)
-                Log.Warn($"authbridge update exited with code {finished.ExitCode}");
-            finished.Dispose();
-            _updater = null;
-        }
+        ReapUpdater();
         var status = TrayNotification.Describe(_tunnels());
         if (status.Color != _color)
         {
@@ -173,7 +149,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
             Window = _window,
             Id = 1,
             Flags = 0x01 | 0x02 | 0x04 | 0x80, // NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP
-            CallbackMessage = WmTrayCallback,
+            CallbackMessage = TrayWindowProcedure.CallbackMessage,
             Icon = _icon,
             Version = 4, // NOTIFYICON_VERSION_4
         };
@@ -240,6 +216,16 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         // The updater must outlive this helper, which it stops before replacing the files.
         var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
         _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
+    }
+
+    private void ReapUpdater()
+    {
+        if (_updater is not { HasExited: true } finished)
+            return;
+        if (finished.ExitCode != 0)
+            Log.Warn($"authbridge update exited with code {finished.ExitCode}");
+        finished.Dispose();
+        _updater = null;
     }
 
     /// <summary>The application icon with a dot in the given color at its bottom right.</summary>

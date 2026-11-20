@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using AuthBridge.Host;
 
 namespace AuthBridge.Common;
 
@@ -37,5 +36,4 @@ internal sealed record PendingRequest(string Id, HttpRequest Request);
 [JsonSerializable(typeof(PingResult))]
 [JsonSerializable(typeof(PendingRequest))]
 [JsonSerializable(typeof(HttpResponse))]
-[JsonSerializable(typeof(HostConfig))]
 internal sealed partial class Json : JsonSerializerContext;
