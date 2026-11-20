@@ -1,5 +1,6 @@
 #!/usr/bin/env dotnet
 using System.Text.Json;
+using System.Xml.Linq;
 
 if (args is not [var reportPath])
 {
@@ -8,9 +9,10 @@ if (args is not [var reportPath])
 }
 
 var root = (string)AppContext.GetData("EntryPointFileDirectoryPath")!;
-using var baseline = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(root, "mutation-baseline.json")));
-var baselineDetected = baseline.RootElement.GetProperty("detected").GetInt32();
-var baselineValid = baseline.RootElement.GetProperty("valid").GetInt32();
+var baseline = XElement.Load(Path.Combine(root, "code-metrics-baseline.props")).Elements("PropertyGroup").Elements()
+    .ToDictionary(property => property.Name.LocalName, StringComparer.Ordinal);
+var baselineDetected = (int)baseline["detectedMutants"];
+var baselineValid = (int)baseline["validMutants"];
 if (baselineDetected <= 0 || baselineDetected > baselineValid)
     throw new InvalidDataException("The mutation baseline must have 0 < detected <= valid.");
 

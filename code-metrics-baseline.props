@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup Label="Roslyn">
+    <maxClassCoupling>56</maxClassCoupling>
+    <maxTypeDepthOfInheritance>4</maxTypeDepthOfInheritance>
+    <minMethodMaintainabilityIndex>46</minMethodMaintainabilityIndex>
+    <maxMethodCyclomaticComplexity>14</maxMethodCyclomaticComplexity>
+    <maxMethodSourceLines>70</maxMethodSourceLines>
+    <maxMethodExecutableLines>28</maxMethodExecutableLines>
+  </PropertyGroup>
+  <PropertyGroup Label="CRAP">
+    <crapMethodThreshold>25</crapMethodThreshold>
+    <maxTotalCrapLoad>15.000</maxTotalCrapLoad>
+  </PropertyGroup>
+  <PropertyGroup Label="Mutation">
+    <detectedMutants>102</detectedMutants>
+    <validMutants>167</validMutants>
+  </PropertyGroup>
+</Project>

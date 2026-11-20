@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\..\code-metrics-baseline.props" />
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>authbridge</AssemblyName>
@@ -22,5 +24,22 @@
     <EmbeddedResource Include="AuthBridge.ico" LogicalName="AuthBridge.ico" />
     <InternalsVisibleTo Include="AuthBridge.Tests" />
   </ItemGroup>
+
+  <Target Name="GenerateCodeMetricsConfig" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <!-- Override the SDK defaults for symbol kinds outside the selected gates. -->
+      <_NoMaintainabilityFloor Include="Type;Field;Property;Event" />
+      <_NoCouplingCeiling Include="Method;Field;Property;Event" />
+      <AdditionalFiles Include="$(IntermediateOutputPath)CodeMetricsConfig.txt" />
+      <FileWrites Include="$(IntermediateOutputPath)CodeMetricsConfig.txt" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)CodeMetricsConfig.txt" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="CA1501(Type): $(maxTypeDepthOfInheritance);
+                             CA1502(Method): $(maxMethodCyclomaticComplexity);
+                             CA1505(Method): $(minMethodMaintainabilityIndex);
+                             CA1506(Type): $(maxClassCoupling);
+                             @(_NoMaintainabilityFloor->'CA1505(%(Identity)): 0');
+                             @(_NoCouplingCeiling->'CA1506(%(Identity)): 2147483647')" />
+  </Target>
 
 </Project>

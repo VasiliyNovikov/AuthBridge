@@ -3,11 +3,13 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using System.Xml.Linq;
 
 Directory.SetCurrentDirectory((string)AppContext.GetData("EntryPointFileDirectoryPath")!);
-using var baseline = JsonDocument.Parse(File.ReadAllBytes("crap-baseline.json"));
-var threshold = baseline.RootElement.GetProperty("methodThreshold").GetInt32();
-var ceiling = baseline.RootElement.GetProperty("maxTotalCrapLoad").GetDecimal();
+var baseline = XElement.Load("code-metrics-baseline.props").Elements("PropertyGroup").Elements()
+    .ToDictionary(property => property.Name.LocalName, StringComparer.Ordinal);
+var threshold = (int)baseline["crapMethodThreshold"];
+var ceiling = (decimal)baseline["maxTotalCrapLoad"];
 if (threshold <= 0 || ceiling < 0)
     throw new InvalidDataException("The CRAP method threshold must be positive and the load ceiling nonnegative.");
 

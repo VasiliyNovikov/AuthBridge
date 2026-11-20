@@ -21,8 +21,8 @@ jobs:
       - name: Run x64 tests and check the whole-app CRAP baseline
         if: matrix.os == 'ubuntu-24.04'
         run: dotnet crap.cs
-      - name: Report class coupling and check the highest count
-        if: matrix.os == 'ubuntu-24.04'
+      - name: Check the six Roslyn code metrics against their baselines
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-24.04' }}
         run: dotnet coupling.cs
       - name: Run Arm64 tests
         if: matrix.os == 'ubuntu-24.04-arm'
@@ -34,12 +34,12 @@ jobs:
           name: crap-analysis
           path: artifacts/crap/
           if-no-files-found: ignore
-      - name: Upload class coupling report
+      - name: Upload Roslyn code metrics and observed baselines
         if: ${{ !cancelled() && matrix.os == 'ubuntu-24.04' }}
         uses: actions/upload-artifact@v7
         with:
           name: class-coupling
-          path: artifacts/coupling/report.json
+          path: artifacts/coupling/
           if-no-files-found: error
 
   mutation:
