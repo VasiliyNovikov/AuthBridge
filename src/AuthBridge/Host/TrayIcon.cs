@@ -213,8 +213,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     private void StartUpdate()
     {
-        // The updater must outlive this helper, which it stops before replacing the files.
-        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "authbridge.exe"), ["update"]) { UseShellExecute = true };
+        var start = new InstalledPackage(AppContext.BaseDirectory).TrayUpdateStartInfo();
         _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
     }
 
@@ -222,8 +221,10 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     {
         if (_updater is not { HasExited: true } finished)
             return;
-        if (finished.ExitCode != 0)
-            Log.Warn($"authbridge update exited with code {finished.ExitCode}");
+        if (finished.ExitCode == TrayUpdate.LogUnavailable)
+            Log.Warn($"tray update could not write {TrayUpdate.LogFileName}");
+        else if (finished.ExitCode != 0)
+            Log.Warn($"authbridge update exited with code {finished.ExitCode}; check {TrayUpdate.LogFileName}");
         finished.Dispose();
         _updater = null;
     }

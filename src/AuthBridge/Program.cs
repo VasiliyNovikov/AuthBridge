@@ -23,11 +23,13 @@ internal static class Program
             }
             return await Cli.InvokeAsync(root, args);
         }
-        catch (Exception e) when (e is Win32Exception or IOException or UnauthorizedAccessException or HttpRequestException)
+        catch (Exception e) when (IsCommandError(e))
         {
             return Fail($"authbridge: {e.Message}");
         }
     }
+
+    internal static bool IsCommandError(Exception error) => error is Win32Exception or IOException or UnauthorizedAccessException or HttpRequestException;
 
     internal static int Fail(string message)
     {

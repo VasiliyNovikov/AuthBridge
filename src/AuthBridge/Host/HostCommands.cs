@@ -14,7 +14,7 @@ internal static partial class HostCommands
         Cli.Command("start", "Start the background helper.", () => StartAsync(AppContext.BaseDirectory)),
         Cli.Command("stop", "Stop the background helper.", StopAsync),
         Cli.Command("install", "Install for this user, start the helper now and at logon, and add it to PATH.", InstallAsync),
-        Cli.Command("update", "Install the latest release; Linux clients get it when they connect.", UpdateAsync),
+        TrayUpdate.CreateCommand(Paths.StateDir, UpdateAsync),
     };
 
     private static HelperControl Control => new(PingAsync, Console.Out, Console.Error);

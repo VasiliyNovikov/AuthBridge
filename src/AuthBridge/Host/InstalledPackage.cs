@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 
 namespace AuthBridge.Host;
@@ -26,6 +27,13 @@ internal sealed class InstalledPackage(string location)
     }
 
     public string HelperExecutable => WindowlessExecutable ?? ConsoleExecutable;
+
+    // The updater stops its parent helper, so it must not rely on pipes owned by that helper.
+    public ProcessStartInfo TrayUpdateStartInfo() => new(HelperExecutable, ["update", TrayUpdate.OptionName])
+    {
+        UseShellExecute = false,
+        CreateNoWindow = true, // Also covers installations with only the console executable.
+    };
 
     // At logon the console executable must start a detached helper, whereas the GUI executable can serve directly.
     public string LogonCommand => WindowlessExecutable is { } gui ? $"\"{gui}\" serve" : $"\"{ConsoleExecutable}\" start";

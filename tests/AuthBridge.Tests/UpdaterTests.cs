@@ -1,3 +1,4 @@
+using System.CommandLine;
 using System.IO.Compression;
 using AuthBridge.Common;
 using AuthBridge.Host;
@@ -165,7 +166,7 @@ public sealed class UpdaterTests
     }
 
     [TestMethod]
-    public void LogonRunsTheGuiHelperDirectlyOrDetachesThroughTheConsoleExecutable()
+    public void LogonAndTrayUpdateUseTheGuiExecutableWhenAvailable()
     {
         var folder = Directory.CreateTempSubdirectory("authbridge launch ");
         try
@@ -174,16 +175,69 @@ public sealed class UpdaterTests
             var console = Path.Combine(folder.FullName, "authbridge.exe");
             Assert.AreEqual(console, package.HelperExecutable);
             Assert.AreEqual($"\"{console}\" start", package.LogonCommand);
+            AssertWindowlessUpdate(console);
 
             var gui = Path.Combine(folder.FullName, "authbridgew.exe");
             File.WriteAllBytes(gui, []);
             Assert.AreEqual(gui, package.HelperExecutable);
             Assert.AreEqual($"\"{gui}\" serve", package.LogonCommand);
-        }
+            AssertWindowlessUpdate(gui);
 
+            void AssertWindowlessUpdate(string executable)
+            {
+                var start = package.TrayUpdateStartInfo();
+                Assert.AreEqual(executable, start.FileName);
+                CollectionAssert.AreEqual(new[] { "update", "--from-tray" }, start.ArgumentList.ToArray());
+                Assert.IsFalse(start.UseShellExecute);
+                Assert.IsTrue(start.CreateNoWindow);
+                Assert.IsFalse(start.RedirectStandardOutput || start.RedirectStandardError);
+            }
+        }
         finally
         {
             folder.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task TrayUpdateRecordsProgressAndFailureWithoutWritingToTheConsole()
+    {
+        var directory = Directory.CreateTempSubdirectory("authbridge-tray-update-");
+        var path = Path.Combine(directory.FullName, "update.log");
+        var output = Console.Out;
+        var error = Console.Error;
+        using var terminal = new StringWriter();
+        try
+        {
+            Console.SetOut(terminal);
+            Console.SetError(terminal);
+            var fail = false;
+            var root = new RootCommand { TrayUpdate.CreateCommand(directory.FullName, () =>
+            {
+                Console.WriteLine("downloading");
+                return fail ? Task.FromException<int>(new IOException("installation failed")) : Task.FromResult(0);
+            }) };
+            Assert.AreEqual(0, await Cli.InvokeAsync(root, ["update"]));
+            Assert.AreEqual("downloading" + Environment.NewLine, terminal.ToString());
+            Assert.IsFalse(File.Exists(path));
+            terminal.GetStringBuilder().Clear();
+
+            fail = true;
+            var arguments = new InstalledPackage(directory.FullName).TrayUpdateStartInfo().ArgumentList.ToArray();
+            Assert.AreEqual(1, await Cli.InvokeAsync(root, arguments));
+            Assert.AreEqual("", terminal.ToString());
+            CollectionAssert.AreEqual(new[] { "downloading", "authbridge: installation failed" }, File.ReadAllLines(path));
+
+            var unavailable = new RootCommand { TrayUpdate.CreateCommand(path, () => throw new AssertFailedException("No log, no update.")) };
+            Assert.AreEqual(TrayUpdate.LogUnavailable, await Cli.InvokeAsync(unavailable, arguments));
+            Assert.AreEqual("", terminal.ToString());
+        }
+        finally
+        {
+            Console.SetOut(output);
+            Console.SetError(error);
+            directory.Delete(recursive: true);
         }
     }
 
