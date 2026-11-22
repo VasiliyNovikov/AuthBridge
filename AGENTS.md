@@ -140,6 +140,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - `TrayIcon` uses raw Win32 because Windows Forms does not support trimming. Its window is hidden rather than
   message-only, so that it receives `TaskbarCreated` after Explorer restarts. Closing the window stops the helper;
   `authbridge stop` does that rather than killing the process, which would leave a stale icon.
+- Automatic updates are opt-in. After staging a release, the automatic updater must get the tray's idle-close
+  acknowledgement before replacing files. The helper checks the preference and active relays again at that point;
+  a cached ping with zero sessions is not enough.
 - Windows 11 keeps an icon's first tooltip as its name, so `TrayIcon` adds the icon with the tooltip `AuthBridge`
   before it sets the status.
 - `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon, which draws the

@@ -18,8 +18,42 @@ public sealed class TunnelTests
             """);
         var config = file.RootElement.Deserialize(HostConfigJson.Default.HostConfig);
         Assert.IsNotNull(config);
+        Assert.IsFalse(config.UpdateAutomatically);
         Assert.AreEqual("dev", config.Targets.Single().Name);
         Assert.IsTrue(JsonElement.DeepEquals(file.RootElement, JsonSerializer.SerializeToElement(config, HostConfigJson.Default.HostConfig)));
+    }
+
+    [TestMethod]
+    public void TrayPreferencePersistsWithoutLosingNewerTunnelOrBrowserSettings()
+    {
+        var directory = Directory.CreateTempSubdirectory("authbridge-settings-");
+        var path = Path.Combine(directory.FullName, "config.json");
+        try
+        {
+            var settings = new HostSettings(path, message => Assert.Fail(message));
+            Assert.IsFalse(settings.Reload()!.UpdateAutomatically);
+            var target = new Target("dev", ["host"], "/home/dev/.authbridge");
+            HostConfig.Edit(path, config => config with { Targets = [target], BrowserCommand = ["browser", "{url}"] });
+            settings.SetUpdateAutomatically(true);
+            Assert.IsTrue(settings.UpdateAutomatically);
+            Assert.AreEqual("dev", settings.Reload()!.Targets.Single().Name);
+
+            var afterRestart = new HostSettings(path, message => Assert.Fail(message));
+            var saved = afterRestart.Reload()!;
+            Assert.IsTrue(saved.UpdateAutomatically);
+            CollectionAssert.AreEqual(new[] { "browser", "{url}" }, saved.BrowserCommand);
+            afterRestart.SetUpdateAutomatically(false);
+            Assert.IsFalse(HostConfig.Load(path).UpdateAutomatically);
+
+            File.WriteAllText(path, "{unfinished");
+            Assert.ThrowsExactly<InvalidDataException>(() => afterRestart.SetUpdateAutomatically(true));
+            Assert.IsFalse(afterRestart.UpdateAutomatically);
+            Assert.AreEqual("{unfinished", File.ReadAllText(path));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 
     [TestMethod]

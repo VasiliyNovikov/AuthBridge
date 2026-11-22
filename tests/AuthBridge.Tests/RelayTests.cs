@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -324,6 +325,58 @@ public sealed class RelayTests
         Assert.IsFalse((await client.NextAsync(original.Session, 0, CancellationToken.None)).Closed);
         await client.CloseAsync(original.Session);
         Assert.AreEqual(200, (await client.OpenAsync(request)).Status);
+    }
+
+    [TestMethod]
+    public async Task AutomaticTrayUpdateWaitsForIdleBeforeLaunchAndAgainBeforeRestart()
+    {
+        var directory = Directory.CreateTempSubdirectory("authbridge-idle-update-");
+        try
+        {
+            var settings = new HostSettings(Path.Combine(directory.FullName, "config.json"), message => Assert.Fail(message));
+            var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
+            await releases.RefreshAsync(DateTime.UtcNow);
+            await using var helper = StartHelper();
+            using var client = ControlClient.ForPort(helper.Port);
+            var launches = 0;
+            using var tray = new TrayUpdater(settings, releases, helper, automatic =>
+            {
+                Assert.IsTrue(automatic);
+                launches++;
+                return Process.GetCurrentProcess(); // A live process handle; never launch a real updater.
+            });
+            tray.Refresh();
+            Assert.AreEqual(0, launches);
+
+            var request = Open(FreePort());
+            var first = await client.OpenAsync(request);
+            Assert.IsNotNull(first.Session);
+            tray.SetUpdateAutomatically(true);
+            tray.Refresh();
+            Assert.AreEqual(0, launches);
+            await client.CloseAsync(first.Session);
+            tray.Refresh();
+            tray.Refresh();
+            tray.StartManual();
+            Assert.AreEqual(1, launches);
+
+            var duringDownload = await client.OpenAsync(request);
+            Assert.IsNotNull(duringDownload.Session);
+            bool UnexpectedClose() => throw new AssertFailedException("A busy or opted-out helper must not be stopped.");
+            Assert.IsFalse(tray.TryRequestIdleRestart(Environment.ProcessId, UnexpectedClose));
+            await client.CloseAsync(duringDownload.Session);
+            tray.SetUpdateAutomatically(false);
+            Assert.IsFalse(tray.TryRequestIdleRestart(Environment.ProcessId, UnexpectedClose));
+            tray.SetUpdateAutomatically(true);
+            Assert.IsFalse(tray.TryRequestIdleRestart(-1, UnexpectedClose));
+            Assert.IsFalse(tray.TryRequestIdleRestart(Environment.ProcessId, () => false));
+            Assert.IsTrue(tray.TryRequestIdleRestart(Environment.ProcessId, () => true));
+            Assert.AreEqual(409, (await client.OpenAsync(request)).Status);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
     }
 
     [TestMethod]

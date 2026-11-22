@@ -7,29 +7,36 @@ namespace AuthBridge.Host;
 /// <summary>The start and status commands use a live ping, not the mere existence of a process.</summary>
 internal sealed class HelperControl(Func<Task<PingResult?>> ping, TextWriter output, TextWriter error)
 {
-    public static void StopProcess(int pid, Func<int, bool> requestExit, TimeSpan timeout)
+    public static bool StopProcess(int pid, Func<int, bool> requestExit, TimeSpan timeout, bool requireApproval = false)
     {
-        Process process;
+        using var process = FindProcess(pid);
+        if (process is null || process.HasExited)
+            return false;
+        var approved = false;
         try
         {
-            process = Process.GetProcessById(pid);
+            approved = requestExit(pid);
+            if (!approved && requireApproval)
+                return false;
+            if (!approved || !process.WaitForExit(timeout))
+                ForceStop(process, timeout);
+            return true;
+        }
+        catch (Exception e) when ((e is InvalidOperationException or Win32Exception) && process.HasExited)
+        {
+            return approved; // An approved shutdown can finish while we are waiting.
+        }
+    }
+
+    private static Process? FindProcess(int pid)
+    {
+        try
+        {
+            return Process.GetProcessById(pid);
         }
         catch (ArgumentException) when (pid > 0)
         {
-            return; // It exited between the ping and opening the process.
-        }
-        using (process)
-        {
-            try
-            {
-                if (process.HasExited || (requestExit(pid) && process.WaitForExit(timeout)))
-                    return;
-                ForceStop(process, timeout);
-            }
-            catch (Exception e) when ((e is InvalidOperationException or Win32Exception) && process.HasExited)
-            {
-                // Normal exit raced with the fallback.
-            }
+            return null; // It exited between the ping and opening the process.
         }
     }
 

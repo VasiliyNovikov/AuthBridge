@@ -52,7 +52,7 @@ internal static partial class HostCommands
 
     /// <summary>Installs the latest release over this installation and restarts the helper, which then updates the
     /// client on each machine when its tunnel connects.</summary>
-    private static async Task<int> UpdateAsync()
+    private static async Task<int> UpdateAsync(bool automatic)
     {
         var latest = await GitHubReleases.LatestAsync();
         if (!AppVersion.IsNewer(latest, AppVersion.Release))
@@ -63,15 +63,36 @@ internal static partial class HostCommands
         Console.WriteLine($"downloading authbridge {latest}");
         var package = await GitHubReleases.DownloadAsync(latest);
         var installation = InstalledPackage.CurrentUser;
-        await installation.InstallAsync(package, StopAsync);
+        if (!await installation.InstallAsync(package, () => StopForUpdateAsync(automatic)))
+        {
+            Console.WriteLine("Automatic update deferred: the helper is busy, unavailable, or no longer opted in.");
+            return TrayUpdate.Deferred;
+        }
         Console.WriteLine($"updated {installation.Location} from {AppVersion.Release} to {latest}");
-        if (await StartAsync(installation.Location) != 0)
+        return await RestartAfterUpdateAsync(installation.Location);
+    }
+
+    private static async Task<int> RestartAfterUpdateAsync(string folder)
+    {
+        if (await StartAsync(folder) != 0)
             return 1;
         var info = await RemoteClient.WaitForChecksAsync(PingAsync, TimeSpan.FromSeconds(2));
         var status = await StatusAsync();
         if (info?.Tunnels.Any(tunnel => tunnel.State != "connected") == true)
             Console.WriteLine("Machines that are not connected get the new client when their tunnels connect.");
         return status;
+    }
+
+    private static async Task<bool> StopForUpdateAsync(bool automatic)
+    {
+        if (!automatic)
+        {
+            await StopAsync();
+            return true;
+        }
+        // A sign-in may have started, or the user may have opted out, while the package was downloading.
+        return await PingAsync() is { Sessions: 0 } running &&
+            HelperControl.StopProcess(running.Pid, TrayIcon.RequestIdleExit, TimeSpan.FromSeconds(15), requireApproval: true);
     }
 
     /// <summary>Installs this package for the current user unless it runs from the installation, starts the helper now
@@ -93,8 +114,10 @@ internal static partial class HostCommands
         var setup = await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --setup-shell");
         Console.Write(setup.OutputOrThrow("remote shell setup failed"));
 
-        var config = HostConfig.Load();
-        (config with { Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/.authbridge")] }).Save();
+        HostConfig.Edit(HostConfig.FilePath, config => config with
+        {
+            Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/.authbridge")],
+        });
         Console.WriteLine($"tunnel '{name}' saved to {HostConfig.FilePath}");
         if (await StartAsync(AppContext.BaseDirectory) != 0)
             return 1;

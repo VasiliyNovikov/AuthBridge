@@ -250,8 +250,10 @@ public sealed class UpdaterTests
                 package.InstallAsync(ReleaseZip("authbridge.exe"), () => throw new AssertFailedException("Incomplete archive stopped the helper.")));
             CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
 
-            await package.InstallAsync(ReleaseZip("authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE"),
-                () => Task.CompletedTask);
+            var release = ReleaseZip("authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE");
+            Assert.IsFalse(await package.InstallAsync(release, () => Task.FromResult(false)));
+            CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
+            Assert.IsTrue(await package.InstallAsync(release, () => Task.FromResult(true)));
 
             Assert.AreEqual(1, running.ReadByte());
             CollectionAssert.AreEqual(new byte[] { 2 }, File.ReadAllBytes(path));
@@ -324,9 +326,9 @@ public sealed class UpdaterTests
             Console.SetOut(terminal);
             Console.SetError(terminal);
             var fail = false;
-            var root = new RootCommand { TrayUpdate.CreateCommand(directory.FullName, () =>
+            var root = new RootCommand { TrayUpdate.CreateCommand(directory.FullName, automatic =>
             {
-                Console.WriteLine("downloading");
+                Console.WriteLine(automatic ? "automatic download" : "downloading");
                 return fail ? Task.FromException<int>(new IOException("installation failed")) : Task.FromResult(0);
             }) };
             Assert.AreEqual(0, await Cli.InvokeAsync(root, ["update"]));
@@ -335,12 +337,15 @@ public sealed class UpdaterTests
             terminal.GetStringBuilder().Clear();
 
             fail = true;
-            var arguments = new InstalledPackage(directory.FullName).TrayUpdateStartInfo().ArgumentList.ToArray();
+            var package = new InstalledPackage(directory.FullName);
+            var arguments = package.TrayUpdateStartInfo().ArgumentList.ToArray();
             Assert.AreEqual(1, await Cli.InvokeAsync(root, arguments));
             Assert.AreEqual("", terminal.ToString());
             CollectionAssert.AreEqual(new[] { "downloading", "authbridge: installation failed" }, File.ReadAllLines(path));
 
-            var unavailable = new RootCommand { TrayUpdate.CreateCommand(path, () => throw new AssertFailedException("No log, no update.")) };
+            Assert.AreEqual(1, await Cli.InvokeAsync(root, package.TrayUpdateStartInfo(automatic: true).ArgumentList.ToArray()));
+            CollectionAssert.AreEqual(new[] { "automatic download", "authbridge: installation failed" }, File.ReadAllLines(path));
+            var unavailable = new RootCommand { TrayUpdate.CreateCommand(path, _ => throw new AssertFailedException("No log, no update.")) };
             Assert.AreEqual(TrayUpdate.LogUnavailable, await Cli.InvokeAsync(unavailable, arguments));
             Assert.AreEqual("", terminal.ToString());
         }
@@ -348,6 +353,39 @@ public sealed class UpdaterTests
         {
             Console.SetOut(output);
             Console.SetError(error);
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task AnAutomaticUpdateCannotRaceAnUpdateStartedInATerminal()
+    {
+        var directory = Directory.CreateTempSubdirectory("authbridge-exclusive-update-");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runs = 0;
+        var root = new RootCommand { TrayUpdate.CreateCommand(directory.FullName, _ =>
+        {
+            started.TrySetResult();
+            return ++runs == 1 ? finish.Task : Task.FromResult(0);
+        }) };
+        var manual = Cli.InvokeAsync(root, ["update"]);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var args = new InstalledPackage(directory.FullName).TrayUpdateStartInfo(automatic: true).ArgumentList.ToArray();
+            Assert.AreEqual(1, await Cli.InvokeAsync(root, args));
+            Assert.AreEqual(1, runs);
+            finish.SetResult(0);
+            Assert.AreEqual(0, await manual);
+            Assert.AreEqual(0, await Cli.InvokeAsync(root, args));
+            Assert.AreEqual(2, runs);
+        }
+        finally
+        {
+            finish.TrySetResult(0);
+            await manual;
             directory.Delete(recursive: true);
         }
     }

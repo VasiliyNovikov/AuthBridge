@@ -5,17 +5,31 @@ namespace AuthBridge.Host;
 internal static class TrayUpdate
 {
     public const string OptionName = "--from-tray";
+    public const string AutomaticOptionName = "--auto-from-tray";
     public const string LogFileName = "update.log";
     public const int LogUnavailable = 2;
+    public const int Deferred = 3;
 
-    public static Command CreateCommand(string stateDir, Func<Task<int>> update)
+    public static Command CreateCommand(string stateDir, Func<bool, Task<int>> update)
     {
         var fromTray = new Option<bool>(OptionName) { Hidden = true };
-        var command = new Command("update", "Install the latest release; Linux clients get it when they connect.") { fromTray };
-        command.SetAction((result, _) => result.GetValue(fromTray)
-            ? RunLoggedAsync(stateDir, update)
-            : update());
+        var automatic = new Option<bool>(AutomaticOptionName) { Hidden = true };
+        var command = new Command("update", "Install the latest release; Linux clients get it when they connect.") { fromTray, automatic };
+        command.SetAction((result, _) =>
+        {
+            var idleOnly = result.GetValue(automatic);
+            Task<int> Run() => RunExclusiveAsync(stateDir, idleOnly, update);
+            return idleOnly || result.GetValue(fromTray) ? RunLoggedAsync(stateDir, Run) : Run();
+        });
         return command;
+    }
+
+    private static async Task<int> RunExclusiveAsync(string stateDir, bool automatic, Func<bool, Task<int>> update)
+    {
+        // A terminal update can race the tray. Hold the lock through file replacement and helper restart.
+        Directory.CreateDirectory(stateDir);
+        using var owner = new FileStream(Path.Combine(stateDir, "update.lock"), FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+        return await update(automatic);
     }
 
     private static async Task<int> RunLoggedAsync(string stateDir, Func<Task<int>> update)

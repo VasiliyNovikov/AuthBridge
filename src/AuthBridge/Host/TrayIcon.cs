@@ -14,6 +14,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 {
     private const string WindowClassName = "AuthBridgeTray";
     private const uint NimAdd = 0, NimModify = 1, NimDelete = 2, NimSetVersion = 4;
+    private const uint MfChecked = 0x0008, SmtoAbortIfHung = 0x0002;
 
     // Window procedures are static, and the helper shows a single icon.
     private static TrayIcon? s_current;
@@ -21,6 +22,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private readonly Func<TunnelStatus[]> _tunnels;
     private readonly TrayMenu _menu;
     private readonly Action _exit;
+    private readonly TrayUpdater _updates;
     private readonly TrayNotification _notification;
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _created = new();
@@ -28,46 +30,54 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private nint _window;
     private nint _icon;
     private uint _color;
-    private Process? _updater;
     private bool _canThemeMenus = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 18362);
 
-    private TrayIcon(Func<TunnelStatus[]> tunnels, Func<bool> updateAvailable, Action exit)
+    private TrayIcon(Func<TunnelStatus[]> tunnels, TrayUpdater updates, Action exit)
     {
         _tunnels = tunnels;
         _exit = exit;
-        _menu = new TrayMenu(OpenLog, () => _updater is null && updateAvailable(), StartUpdate,
-            () => AboutDialog.Show(_window, GetModuleHandleW(null)), () => PostMessageW(_window, TrayWindowProcedure.CloseMessage, 0, 0));
+        _updates = updates;
+        _menu = new TrayMenu(OpenLog, () => updates.CanUpdate, updates.StartManual, () => updates.UpdateAutomatically, updates.SetUpdateAutomatically,
+            () => AboutDialog.Show(_window, GetModuleHandleW(null)), () => PostClose(_window));
         _notification = new TrayNotification(tip => Notify(NimModify, tip), name => Notify(NimAdd, name));
         _procedure = new TrayWindowProcedure(RegisterWindowMessageW("TaskbarCreated"), Refresh, ShowMenu, OnClose,
-            () => PostQuitMessage(0), _notification.Invalidate);
+            () => PostQuitMessage(0), _notification.Invalidate,
+            pid => updates.TryRequestIdleRestart(pid, () => PostClose(_window)));
         _thread = new Thread(Run) { IsBackground = true, Name = "Tray icon" };
         _thread.SetApartmentState(ApartmentState.STA);
     }
 
     /// <summary>Shows the icon until disposed; <paramref name="exit"/> runs on the thread pool once its window closes.</summary>
-    public static TrayIcon Start(Func<TunnelStatus[]> tunnels, Func<bool> updateAvailable, Action exit)
+    public static TrayIcon Start(Func<TunnelStatus[]> tunnels, TrayUpdater updates, Action exit)
     {
-        var tray = s_current = new TrayIcon(tunnels, updateAvailable, exit);
+        var tray = s_current = new TrayIcon(tunnels, updates, exit);
         tray._thread.Start();
         tray._created.Wait();
         return tray;
     }
 
     /// <summary>Asks a helper process to exit by closing its icon's window; false if it has none.</summary>
-    public static bool RequestExit(int processId)
+    public static bool RequestExit(int processId) => RequestWindow(processId, PostClose);
+
+    private static bool PostClose(nint window) => PostMessageW(window, TrayWindowProcedure.CloseMessage, 0, 0) != 0;
+
+    public static bool RequestIdleExit(int processId) => RequestWindow(processId, window =>
+        SendMessageTimeoutW(window, TrayWindowProcedure.AutomaticUpdateReady, Environment.ProcessId, 0, SmtoAbortIfHung, 5000, out var accepted) != 0 && accepted != 0);
+
+    private static bool RequestWindow(int processId, Func<nint, bool> send)
     {
         var requested = false;
         for (nint window = 0; (window = FindWindowExW(0, window, WindowClassName, null)) != 0;)
         {
             if (GetWindowThreadProcessId(window, out var owner) != 0 && owner == processId)
-                requested |= PostMessageW(window, TrayWindowProcedure.CloseMessage, 0, 0) != 0;
+                requested |= send(window);
         }
         return requested;
     }
 
     public void Dispose()
     {
-        PostMessageW(_window, TrayWindowProcedure.CloseMessage, 0, 0);
+        PostClose(_window);
         _thread.Join(TimeSpan.FromSeconds(5));
     }
 
@@ -98,7 +108,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         }
         finally
         {
-            _updater?.Dispose();
+            _updates.Dispose();
             _created.Set();
         }
     }
@@ -108,8 +118,8 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     {
         try
         {
-            if (s_current!._procedure.Handle(message, wParam, lParam))
-                return 0;
+            if (s_current!._procedure.Handle(message, wParam, lParam) is { } reply)
+                return reply;
         }
         catch (Exception e)
         {
@@ -127,7 +137,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     private void Refresh()
     {
-        ReapUpdater();
+        _updates.Refresh();
         var status = TrayNotification.Describe(_tunnels());
         if (status.Color != _color)
         {
@@ -164,26 +174,31 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         if (popup != _window)
             return;
         ApplyMenuTheme();
-        _menu.Show(labels => TrackMenu(labels, x, y));
+        _menu.Show(items => WithPopup(items, menu => TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0))); // TPM_RETURNCMD | TPM_RIGHTBUTTON
     }
 
-    private int TrackMenu(IReadOnlyList<string> labels, int x, int y)
+    internal static int WithPopup(IReadOnlyList<TrayMenu.Item> items, Func<nint, int> select)
     {
         var menu = CreatePopupMenu();
         if (menu == 0)
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         try
         {
-            for (var i = 0; i < labels.Count; i++)
-            {
-                if (AppendMenuW(menu, 0, (nuint)(i + 1), labels[i]) == 0)
-                    throw new Win32Exception(Marshal.GetLastPInvokeError());
-            }
-            return TrackPopupMenuEx(menu, 0x0100 | 0x0002, x, y, _window, 0); // TPM_RETURNCMD | TPM_RIGHTBUTTON
+            AppendMenuItems(menu, items);
+            return select(menu);
         }
         finally
         {
             DestroyMenu(menu);
+        }
+    }
+
+    private static void AppendMenuItems(nint menu, IReadOnlyList<TrayMenu.Item> items)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (AppendMenuW(menu, items[i].Checked ? MfChecked : 0, (nuint)(i + 1), items[i].Label) == 0)
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
     }
 
@@ -209,24 +224,6 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     {
         if (Log.FilePath is { } log)
             Process.Start(new ProcessStartInfo(log) { UseShellExecute = true })?.Dispose();
-    }
-
-    private void StartUpdate()
-    {
-        var start = new InstalledPackage(AppContext.BaseDirectory).TrayUpdateStartInfo();
-        _updater = Process.Start(start) ?? throw new InvalidOperationException("could not start authbridge update");
-    }
-
-    private void ReapUpdater()
-    {
-        if (_updater is not { HasExited: true } finished)
-            return;
-        if (finished.ExitCode == TrayUpdate.LogUnavailable)
-            Log.Warn($"tray update could not write {TrayUpdate.LogFileName}");
-        else if (finished.ExitCode != 0)
-            Log.Warn($"authbridge update exited with code {finished.ExitCode}; check {TrayUpdate.LogFileName}");
-        finished.Dispose();
-        _updater = null;
     }
 
     /// <summary>The application icon with a dot in the given color at its bottom right.</summary>
@@ -321,6 +318,9 @@ internal sealed unsafe partial class TrayIcon : IDisposable
 
     [LibraryImport("user32.dll")]
     private static partial int PostMessageW(nint window, uint message, nint wParam, nint lParam);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint SendMessageTimeoutW(nint window, uint message, nint wParam, nint lParam, uint flags, uint timeout, out nuint result);
 
     [LibraryImport("user32.dll")]
     private static partial void PostQuitMessage(int exitCode);

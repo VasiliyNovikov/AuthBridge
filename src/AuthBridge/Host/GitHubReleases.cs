@@ -41,9 +41,11 @@ internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, 
     private int _intervalMinutes = CheckMinutes;
     private DateTime _nextCheck;
     private Task _pending = Task.CompletedTask;
-    private volatile bool _available;
+    private volatile ReleaseOffer? _offer;
 
-    public bool Available => _available;
+    public sealed record ReleaseOffer(string Version, DateTime CheckedAt);
+    public ReleaseOffer? Offer => _offer;
+    public bool Available => _offer is not null;
 
     public Task RefreshAsync(DateTime now, CancellationToken stopping = default)
     {
@@ -56,7 +58,8 @@ internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, 
     {
         try
         {
-            _available = AppVersion.IsNewer(await latest(stopping), current);
+            var version = await latest(stopping);
+            _offer = AppVersion.IsNewer(version, current) ? new ReleaseOffer(version, now) : null;
             _intervalMinutes = CheckMinutes;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)

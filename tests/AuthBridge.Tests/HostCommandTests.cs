@@ -88,6 +88,8 @@ public sealed class HostCommandTests
         using var child = Process.Start(Processes.StartInfo(OperatingSystem.IsWindows() ? "sort.exe" : "cat", []))!;
         try
         {
+            Assert.IsFalse(HelperControl.StopProcess(child.Id, _ => false, TimeSpan.Zero, requireApproval: true));
+            Assert.IsFalse(child.HasExited);
             var refused = Assert.ThrowsExactly<IOException>(() => HelperControl.StopProcess(child.Id, _ => false, TimeSpan.Zero));
             StringAssert.Contains(refused.Message, "refusing");
             Assert.IsFalse(child.HasExited);

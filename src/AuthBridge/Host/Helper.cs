@@ -17,8 +17,33 @@ internal sealed class Helper(Action<string> openBrowser, Func<TunnelStatus[]> tu
     private readonly ConcurrentDictionary<string, RelaySession> _sessions = new();
     private readonly ConcurrentDictionary<string, (string Url, DateTime Expires)> _redirects = new();
     private HttpServer? _server;
+    private bool _restarting;
 
     public int Port => _server?.Port ?? throw new InvalidOperationException("The helper is not started.");
+    public bool HasRelaySessions => !_sessions.IsEmpty;
+
+    /// <summary>Once an idle restart is accepted, a new sign-in must not acquire a relay before the helper exits.</summary>
+    public bool TryRequestIdleRestart(Func<bool> postClose)
+    {
+        lock (_sessions)
+        {
+            if (_restarting || HasRelaySessions)
+                return false;
+            _restarting = postClose();
+            return _restarting;
+        }
+    }
+
+    private bool TryRegister(RelaySession session)
+    {
+        lock (_sessions)
+        {
+            if (_restarting)
+                return false;
+            _sessions[session.Id] = session;
+            return true;
+        }
+    }
 
     /// <summary>Listens on the loopback control port; throws <see cref="SocketException"/> if it is in use.</summary>
     public void Start(int port) => _server = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, port), HandleAsync);
@@ -91,7 +116,11 @@ internal sealed class Helper(Action<string> openBrowser, Func<TunnelStatus[]> tu
                 Log.Warn($"cannot relay port {port}: {e.Message}");
                 return Error(409, $"port {port} is unavailable on Windows ({e.Message})");
             }
-            _sessions[session.Id] = session;
+            if (!TryRegister(session))
+            {
+                await session.DisposeAsync();
+                return Error(409, "the helper is restarting for an update");
+            }
         }
         return await OpenBrowserAsync(request, session);
     }

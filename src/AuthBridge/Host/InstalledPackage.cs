@@ -32,11 +32,12 @@ internal sealed class InstalledPackage(string location)
         || string.Equals(path, Path.Combine(Location, "authbridgew.exe"), StringComparison.OrdinalIgnoreCase);
 
     // The updater stops its parent helper, so it must not rely on pipes owned by that helper.
-    public ProcessStartInfo TrayUpdateStartInfo() => new(HelperExecutable, ["update", TrayUpdate.OptionName])
-    {
-        UseShellExecute = false,
-        CreateNoWindow = true, // Also covers installations with only the console executable.
-    };
+    public ProcessStartInfo TrayUpdateStartInfo(bool automatic = false) =>
+        new(HelperExecutable, ["update", automatic ? TrayUpdate.AutomaticOptionName : TrayUpdate.OptionName])
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true, // Also covers installations with only the console executable.
+        };
 
     // At logon the console executable must start a detached helper, whereas the GUI executable can serve directly.
     public string LogonCommand => WindowlessExecutable is { } gui ? $"\"{gui}\" serve" : $"\"{ConsoleExecutable}\" start";
@@ -52,7 +53,7 @@ internal sealed class InstalledPackage(string location)
     }
 
     /// <summary>Installs a release package downloaded from GitHub.</summary>
-    public async Task InstallAsync(byte[] package, Func<Task> stopIfRunning)
+    public async Task<bool> InstallAsync(byte[] package, Func<Task<bool>> stopForUpdate)
     {
         using var archive = new ZipArchive(new MemoryStream(package));
         var staging = Directory.CreateTempSubdirectory("authbridge-update-");
@@ -65,7 +66,10 @@ internal sealed class InstalledPackage(string location)
                     throw new InvalidDataException($"The release package is missing {name} or it is empty.");
                 entry.ExtractToFile(Path.Combine(staging.FullName, name));
             }
-            await InstallFromAsync(staging.FullName, stopIfRunning);
+            if (!await stopForUpdate())
+                return false;
+            InstallFilesFrom(staging.FullName);
+            return true;
         }
         finally
         {
@@ -84,10 +88,15 @@ internal sealed class InstalledPackage(string location)
             throw new FileNotFoundException("The Windows package is missing authbridge.exe.", executable);
 
         await stopIfRunning();
+        InstallFilesFrom(source);
+        return true;
+    }
+
+    private void InstallFilesFrom(string source)
+    {
         foreach (var name in PackageFiles.Where(name => File.Exists(Path.Combine(source, name))))
             Replace(name, path => File.Copy(Path.Combine(source, name), path));
         DeleteReplacedFiles();
-        return true;
     }
 
     /// <summary>Deletes the files that updates replaced, except those still in use.</summary>

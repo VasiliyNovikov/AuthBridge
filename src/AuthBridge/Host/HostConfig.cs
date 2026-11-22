@@ -8,7 +8,8 @@ namespace AuthBridge.Host;
 internal sealed record Target(string Name, string[] Ssh, string RemoteDir);
 
 /// <summary>The helper's settings in %USERPROFILE%\.authbridge\config.json.</summary>
-internal sealed record HostConfig(Target[] Targets, string[]? BrowserCommand = null)
+internal sealed record HostConfig(Target[] Targets, string[]? BrowserCommand = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool UpdateAutomatically = false)
 {
     public static string FilePath => Path.Combine(Paths.StateDir, "config.json");
 
@@ -40,11 +41,23 @@ internal sealed record HostConfig(Target[] Targets, string[]? BrowserCommand = n
     private static bool InvalidTarget(Target? target) => target is null || string.IsNullOrWhiteSpace(target.Name)
         || string.IsNullOrWhiteSpace(target.RemoteDir) || target.Ssh is not { Length: > 0 } || target.Ssh.Contains(null);
 
-    public void Save()
+    public static HostConfig Edit(string path, Func<HostConfig, HostConfig> change)
     {
-        Paths.EnsureStateDir();
-        File.WriteAllBytes(FilePath + ".tmp", JsonSerializer.SerializeToUtf8Bytes(this, HostConfigJson.Default.HostConfig));
-        File.Move(FilePath + ".tmp", FilePath, overwrite: true);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // The tray and install-remote are separate writers. Read the latest settings while holding the writer lock.
+        using var writer = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
+        var config = change(Load(path));
+        var temp = path + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(config, HostConfigJson.Default.HostConfig));
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temp);
+        }
+        return config;
     }
 }
 
@@ -58,10 +71,27 @@ internal sealed class HostSettings(string path, Action<string> warn)
     private DateTime? _lastWrite;
     private string? _lastError;
     private volatile HostConfig? _current;
+    private readonly Lock _gate = new();
 
     public HostConfig Current => _current ?? throw new InvalidOperationException($"No valid configuration loaded from '{path}'.");
+    public bool UpdateAutomatically => _current?.UpdateAutomatically == true;
+
+    public void SetUpdateAutomatically(bool enabled)
+    {
+        lock (_gate)
+        {
+            _current = HostConfig.Edit(path, config => config with { UpdateAutomatically = enabled });
+            _lastWrite = null; // The maintenance loop must still apply any tunnel edits picked up from disk.
+        }
+    }
 
     public HostConfig? Reload()
+    {
+        lock (_gate)
+            return ReloadIfChanged();
+    }
+
+    private HostConfig? ReloadIfChanged()
     {
         try
         {

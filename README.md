@@ -116,8 +116,13 @@ The tray menu also lets you open the log or exit.
 On Windows 10 version 1903 and later, the menu follows your Windows app theme.
 The helper checks for updates at startup and every five minutes using only GitHub's release redirect headers.
 If checks fail, it keeps the last known result and waits longer between attempts, up to an hour. When a newer release
-is available, choose **Update** to install it and restart the helper without opening a terminal. Progress and errors from the latest tray
-update are in `%USERPROFILE%\.authbridge\update.log`. Run `authbridge update` from a terminal to see progress there.
+is available, choose **Update** to install it and restart the helper without opening a terminal.
+
+Check **Update automatically** in the tray menu to install new releases silently when no sign-in relay is active.
+It is off by default; the choice is saved as `updateAutomatically` in the Windows `config.json`. If a relay starts
+during the download, the helper defers installation until a later check. Uncheck the option to return to manual
+updates. Progress and errors from the latest tray update are in `%USERPROFILE%\.authbridge\update.log`.
+Run `authbridge update` from a terminal to see progress there.
 Windows 11 may first put it among the hidden icons; drag it to the taskbar to keep it in view.
 
 Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`. Tunnels are kept in
