@@ -114,8 +114,9 @@ are, and gray when none are. Hover over it for each machine's state. Right-click
 the helper's version. The About window follows your Windows app theme and respects contrast themes.
 The tray menu also lets you open the log or exit.
 On Windows 10 version 1903 and later, the menu follows your Windows app theme.
-The helper checks for updates at startup and once an hour. When a newer release is available, choose **Update** in
-that menu to install it and restart the helper without opening a terminal. Progress and errors from the latest tray
+The helper checks for updates at startup and every five minutes using only GitHub's release redirect headers.
+If checks fail, it keeps the last known result and waits longer between attempts, up to an hour. When a newer release
+is available, choose **Update** to install it and restart the helper without opening a terminal. Progress and errors from the latest tray
 update are in `%USERPROFILE%\.authbridge\update.log`. Run `authbridge update` from a terminal to see progress there.
 Windows 11 may first put it among the hidden icons; drag it to the taskbar to keep it in view.
 

@@ -6,16 +6,24 @@ namespace AuthBridge.Host;
 internal static class GitHubReleases
 {
     private const string Releases = "https://github.com/VasiliyNovikov/AuthBridge/releases";
-
-    public static async Task<string> LatestAsync(CancellationToken stopping = default)
+    private static readonly HttpClient VersionLookup = new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
     {
-        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
-        using var response = await http.GetAsync($"{Releases}/latest", stopping);
+        BaseAddress = new Uri($"{Releases}/"),
+    };
+
+    public static Task<string> LatestAsync(CancellationToken stopping = default) => ReadLatestAsync(VersionLookup, stopping);
+
+    internal static async Task<string> ReadLatestAsync(HttpClient http, CancellationToken stopping)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Head, "latest");
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, stopping);
         // GitHub redirects to the page of the latest release, .../releases/tag/v1.2.3.
         const string prefix = "/tag/v";
         var location = response.Headers.Location?.OriginalString ?? "";
         var tag = location.LastIndexOf(prefix, StringComparison.Ordinal);
-        return tag >= 0 ? location[(tag + prefix.Length)..] : throw new HttpRequestException($"no release found at {Releases}");
+        if ((int)response.StatusCode is >= 300 and < 400 && tag >= 0 && tag + prefix.Length < location.Length)
+            return location[(tag + prefix.Length)..];
+        throw new HttpRequestException($"no release redirect at {Releases}/latest (HTTP {(int)response.StatusCode})");
     }
 
     public static async Task<byte[]> DownloadAsync(string version)
@@ -26,9 +34,11 @@ internal static class GitHubReleases
     }
 }
 
-/// <summary>Checks at most once an hour on the helper loop; the tray reads the last successful result without waiting.</summary>
+/// <summary>Checks on the helper loop; the tray reads the last successful result without waiting.</summary>
 internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, string current)
 {
+    private const int CheckMinutes = 5;
+    private int _intervalMinutes = CheckMinutes;
     private DateTime _nextCheck;
     private Task _pending = Task.CompletedTask;
     private volatile bool _available;
@@ -37,24 +47,29 @@ internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, 
 
     public Task RefreshAsync(DateTime now, CancellationToken stopping = default)
     {
-        if (now >= _nextCheck && _pending.IsCompleted)
-        {
-            _nextCheck = now.AddHours(1);
-            _pending = CheckAsync(stopping);
-        }
+        if (_pending.IsCompleted && now >= _nextCheck && !stopping.IsCancellationRequested)
+            _pending = CheckAsync(now, stopping);
         return _pending;
     }
 
-    private async Task CheckAsync(CancellationToken stopping)
+    private async Task CheckAsync(DateTime now, CancellationToken stopping)
     {
         try
         {
             _available = AppVersion.IsNewer(await latest(stopping), current);
+            _intervalMinutes = CheckMinutes;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
             if (!stopping.IsCancellationRequested)
-                Log.Warn($"cannot check for updates: {e.Message}");
+            {
+                _intervalMinutes = Math.Min(2 * _intervalMinutes, 60);
+                Log.Warn($"cannot check for updates: {e.Message}; retrying in {_intervalMinutes} minutes");
+            }
+        }
+        finally
+        {
+            _nextCheck = now.AddMinutes(_intervalMinutes);
         }
     }
 }

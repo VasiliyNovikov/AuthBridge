@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.IO.Compression;
+using System.Net;
 using System.Text;
 using AuthBridge.Common;
 using AuthBridge.Host;
@@ -120,38 +121,75 @@ public sealed class UpdaterTests
     }
 
     [TestMethod]
-    public async Task OffersOnlyConfirmedUpdatesAndCachesTheCheck()
+    [DataRow(302)]
+    [DataRow(503)]
+    public async Task ChecksOnlyTheLatestReleaseHeadersAndRequiresARedirect(int status)
+    {
+        await using var server = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(
+            request is { Method: "HEAD", Target: "/releases/latest" }
+                ? new HttpResponse(status, [new("Location", "/releases/tag/v1.2.3")], [])
+                : new HttpResponse(405, [], [])));
+        using var http = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
+        {
+            BaseAddress = new Uri($"http://127.0.0.1:{server.Port}/releases/"),
+        };
+        if (status == 302)
+            Assert.AreEqual("1.2.3", await GitHubReleases.ReadLatestAsync(http, CancellationToken.None));
+        else
+            await Assert.ThrowsExactlyAsync<HttpRequestException>(() => GitHubReleases.ReadLatestAsync(http, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task RechecksAtFiveMinutesWithoutOverlappingAnUnfinishedCheck()
     {
         var pending = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var checks = 0;
-        var updates = new UpdateCheck(_ => ++checks == 1 ? pending.Task : Task.FromResult("0.1.9"), "0.1.9");
+        var updates = new UpdateCheck(_ => ++checks == 1 ? Task.FromResult("0.1.10") : pending.Task, "0.1.9");
         var now = DateTime.UtcNow;
 
-        var first = updates.RefreshAsync(now);
-        Assert.IsFalse(updates.Available);
-        pending.SetResult("0.1.10");
-        await first;
-        await updates.RefreshAsync(now.AddMinutes(1));
+        await updates.RefreshAsync(now);
+        await updates.RefreshAsync(now.AddMinutes(5).AddTicks(-1));
         Assert.IsTrue(updates.Available);
         Assert.AreEqual(1, checks);
 
-        await updates.RefreshAsync(now.AddHours(1));
+        var second = updates.RefreshAsync(now.AddMinutes(5));
+        Assert.AreSame(second, updates.RefreshAsync(now.AddMinutes(10)));
+        Assert.AreEqual(2, checks);
+        Assert.IsTrue(updates.Available);
+        pending.SetResult("0.1.9");
+        await second;
         Assert.IsFalse(updates.Available);
     }
 
     [TestMethod]
-    public async Task AnOfflineCheckCanBeRetried()
+    public async Task OfflineChecksBackOffWithoutLosingAKnownUpdateAndRecoveryRestoresFiveMinutes()
     {
         var checks = 0;
-        var updates = new UpdateCheck(_ => ++checks == 1
-            ? Task.FromException<string>(new HttpRequestException("offline"))
-            : Task.FromResult("0.1.10"), "0.1.9");
+        var offline = false;
+        var updates = new UpdateCheck(_ =>
+        {
+            checks++;
+            return offline ? Task.FromException<string>(new HttpRequestException("offline")) : Task.FromResult("0.1.10");
+        }, "0.1.9");
         var now = DateTime.UtcNow;
-
         await updates.RefreshAsync(now);
-        Assert.IsFalse(updates.Available);
-        await updates.RefreshAsync(now.AddHours(1));
-        Assert.IsTrue(updates.Available);
+        offline = true;
+        foreach (var minutes in new[] { 5, 10, 20, 40, 60, 60 })
+        {
+            var before = checks;
+            now = now.AddMinutes(minutes);
+            await updates.RefreshAsync(now.AddTicks(-1));
+            Assert.AreEqual(before, checks);
+            await updates.RefreshAsync(now);
+            Assert.AreEqual(before + 1, checks);
+            Assert.IsTrue(updates.Available);
+        }
+        offline = false;
+        now = now.AddHours(1);
+        var beforeRecovery = checks;
+        await updates.RefreshAsync(now);
+        await updates.RefreshAsync(now.AddMinutes(5));
+        Assert.AreEqual(beforeRecovery + 2, checks);
     }
 
     [TestMethod]
