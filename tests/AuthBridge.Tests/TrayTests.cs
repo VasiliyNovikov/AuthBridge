@@ -97,21 +97,21 @@ public sealed class TrayTests
             () => actions.Add("about"), () => actions.Add("exit"));
         menu.Show(items =>
         {
-            CollectionAssert.AreEqual(new[] { "Open log", "Update automatically", "About", "Exit" }, items.Select(item => item.Label).ToArray());
+            CollectionAssert.AreEqual(new[] { "Open log", "Auto-update", "About", "Exit" }, items.Select(item => item.Label).ToArray());
             Assert.IsFalse(items[1].Checked);
             available = true;
             return 3; // The visible item is still About.
         });
         menu.Show(items =>
         {
-            CollectionAssert.AreEqual(new[] { "Open log", "Update", "Update automatically", "About", "Exit" }, items.Select(item => item.Label).ToArray());
+            CollectionAssert.AreEqual(new[] { "Open log", "Update", "Auto-update", "About", "Exit" }, items.Select(item => item.Label).ToArray());
             return 2;
         });
         menu.Show(_ => { available = false; return 2; });
         menu.Show(_ => 2); // Check the option while no update is offered.
         menu.Show(items =>
         {
-            Assert.AreEqual("Update automatically", items.Single(item => item.Checked).Label);
+            Assert.AreEqual("Auto-update", items.Single(item => item.Checked).Label);
             return 0;
         });
         Assert.IsTrue(automatic);
@@ -130,7 +130,7 @@ public sealed class TrayTests
             Assert.Inconclusive("Requires a Windows popup menu.");
             return;
         }
-        TrayMenu.Item[] items = [new("Open log", () => { }), new("Update automatically", () => { }, enabled)];
+        TrayMenu.Item[] items = [new("Open log", () => { }), new("Auto-update", () => { }, enabled)];
         TrayIcon.WithPopup(items, popup =>
         {
             var state = GetMenuState(popup, 2, 0); // MF_BYCOMMAND

@@ -12,7 +12,7 @@ internal sealed class TrayMenu(Action openLog, Func<bool> canUpdate, Action upda
         if (canUpdate())
             items.Add(new("Update", UpdateIfAvailable));
         var enabled = updateAutomatically();
-        items.Add(new("Update automatically", () => setUpdateAutomatically(!enabled), enabled));
+        items.Add(new("Auto-update", () => setUpdateAutomatically(!enabled), enabled));
         items.Add(new("About", about));
         items.Add(new("Exit", exit));
 
