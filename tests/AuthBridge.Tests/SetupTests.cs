@@ -65,7 +65,7 @@ public sealed class SetupTests
         var wrapped = Setup.WrapGcmHelpers(helpers, "/bin/wb", name => name == "git-credential-manager" ? "/usr/bin/git-credential-manager" : null);
 
         CollectionAssert.AreEqual(
-            new[] { "", "/bin/wb --gcm /usr/bin/git-credential-manager", "/bin/wb --gcm /usr/bin/git-credential-manager", "store", helpers[4] },
+            new[] { "", "!'/bin/wb' --gcm '/usr/bin/git-credential-manager'", "!'/bin/wb' --gcm '/usr/bin/git-credential-manager'", "store", helpers[4] },
             wrapped);
     }
 
@@ -97,7 +97,22 @@ public sealed class SetupTests
         });
 
         Assert.AreEqual(0, result);
-        CollectionAssert.AreEqual(new[] { "config", "--global", "--get-all", "credential.helper" }, calls.Single());
+        CollectionAssert.AreEqual(new[] { "config", "--global", "--get-all", "--null", "credential.helper" }, calls.Single());
+    }
+
+    [TestMethod]
+    public async Task RewritingGitHelpersKeepsUnrelatedMultilineEntriesAndTrailingResets()
+    {
+        var added = new List<string>();
+        await Setup.ConfigureGcmAsync("/my tools/authbridge", _ => "/team's tools/git-credential-manager", args =>
+        {
+            if (args[2] == "--get-all")
+                return Task.FromResult(new ProcessResult(0, "manager --flag 'two  words'\0!keep\nthis\0\0", ""));
+            if (args[2] == "--add")
+                added.Add(args[^1]);
+            return Task.FromResult(new ProcessResult(0, "", ""));
+        });
+        CollectionAssert.AreEqual(new[] { "!'/my tools/authbridge' --gcm '/team'\\''s tools/git-credential-manager' --flag 'two  words'", "!keep\nthis", "" }, added);
     }
 
     [TestMethod]
@@ -111,7 +126,7 @@ public sealed class SetupTests
         {
             calls++;
             var result = args[2] == failingOption ? new ProcessResult(1, "", "config unavailable")
-                : new ProcessResult(0, args[2] == "--get-all" ? "/bin/git-credential-manager\nstore\n" : "", "");
+                : new ProcessResult(0, args[2] == "--get-all" ? "/bin/git-credential-manager\0store\0" : "", "");
             return Task.FromResult(result);
         }));
 

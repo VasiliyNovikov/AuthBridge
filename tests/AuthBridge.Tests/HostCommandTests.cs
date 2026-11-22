@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AuthBridge.Common;
 using AuthBridge.Host;
 
@@ -79,6 +80,25 @@ public sealed class HostCommandTests
         StringAssert.Contains(error.ToString(), "test-host.log");
         StringAssert.Contains(error.ToString(), "not running");
         Assert.AreEqual("", output.ToString());
+    }
+
+    [TestMethod]
+    public void ForcedStopRejectsAnUnrelatedProcessAndGracefulStopWaitsForExit()
+    {
+        using var child = Process.Start(Processes.StartInfo(OperatingSystem.IsWindows() ? "sort.exe" : "cat", []))!;
+        try
+        {
+            var refused = Assert.ThrowsExactly<IOException>(() => HelperControl.StopProcess(child.Id, _ => false, TimeSpan.Zero));
+            StringAssert.Contains(refused.Message, "refusing");
+            Assert.IsFalse(child.HasExited);
+            HelperControl.StopProcess(child.Id, _ => { child.StandardInput.Close(); return true; }, TimeSpan.FromSeconds(5));
+            Assert.IsTrue(child.HasExited);
+        }
+        finally
+        {
+            if (!child.HasExited)
+                child.Kill();
+        }
     }
 
     [TestMethod]

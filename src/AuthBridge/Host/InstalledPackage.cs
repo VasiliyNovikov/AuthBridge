@@ -28,6 +28,9 @@ internal sealed class InstalledPackage(string location)
 
     public string HelperExecutable => WindowlessExecutable ?? ConsoleExecutable;
 
+    internal bool ContainsExecutable(string? path) => string.Equals(path, ConsoleExecutable, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(path, Path.Combine(Location, "authbridgew.exe"), StringComparison.OrdinalIgnoreCase);
+
     // The updater stops its parent helper, so it must not rely on pipes owned by that helper.
     public ProcessStartInfo TrayUpdateStartInfo() => new(HelperExecutable, ["update", TrayUpdate.OptionName])
     {
@@ -49,12 +52,25 @@ internal sealed class InstalledPackage(string location)
     }
 
     /// <summary>Installs a release package downloaded from GitHub.</summary>
-    public void Install(byte[] package)
+    public async Task InstallAsync(byte[] package, Func<Task> stopIfRunning)
     {
         using var archive = new ZipArchive(new MemoryStream(package));
-        foreach (var entry in archive.Entries)
-            Replace(Path.GetFileName(entry.FullName), entry.ExtractToFile);
-        DeleteReplacedFiles();
+        var staging = Directory.CreateTempSubdirectory("authbridge-update-");
+        try
+        {
+            // Verify and extract the entire release before stopping the working helper or modifying its files.
+            foreach (var name in PackageFiles)
+            {
+                if (archive.GetEntry(name) is not { Length: > 0 } entry)
+                    throw new InvalidDataException($"The release package is missing {name} or it is empty.");
+                entry.ExtractToFile(Path.Combine(staging.FullName, name));
+            }
+            await InstallFromAsync(staging.FullName, stopIfRunning);
+        }
+        finally
+        {
+            staging.Delete(recursive: true);
+        }
     }
 
     /// <summary>Copies a package into place after stopping the helper. An in-place install needs neither step.</summary>
@@ -100,9 +116,29 @@ internal sealed class InstalledPackage(string location)
         Directory.CreateDirectory(Location);
         var path = Path.Combine(Location, name);
         var fresh = $"{path}.{Environment.ProcessId}.new";
-        write(fresh);
-        if (File.Exists(path))
-            File.Move(path, $"{path}.{Environment.ProcessId}{ReplacedSuffix}");
-        File.Move(fresh, path);
+        try
+        {
+            write(fresh);
+            if (!File.Exists(path))
+            {
+                File.Move(fresh, path);
+                return;
+            }
+            var backup = $"{path}.{Environment.ProcessId}{ReplacedSuffix}";
+            File.Move(path, backup);
+            try
+            {
+                File.Move(fresh, path);
+            }
+            catch
+            {
+                File.Move(backup, path);
+                throw;
+            }
+        }
+        finally
+        {
+            File.Delete(fresh);
+        }
     }
 }

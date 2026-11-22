@@ -82,21 +82,40 @@ internal static class Relay
             }
             catch (Exception e) when (IsUnreachable(e, cancel))
             {
-                Log.Warn($"{Name}: helper unreachable: {e.Message}");
-                return await RetryAsync(cancel);
+                return await RetryAsync(e, cancel);
             }
             if (next.Closed)
             {
                 Log.Info($"{Name}: ended by the helper");
                 return false;
             }
-            if (next.Request is { } pending)
-                await _current.ReplyAsync(id, pending.Id, await ForwardAsync(port, pending.Request, cancel), cancel);
-            return true;
+            if (next.Request is not { } pending)
+                return true;
+            var response = await ForwardAsync(port, pending.Request, cancel);
+            return await DeliverAsync(pending.Id, response, cancel);
         }
 
-        private async Task<bool> RetryAsync(CancellationToken cancel)
+        private async Task<bool> DeliverAsync(string requestId, HttpResponse response, CancellationToken cancel)
         {
+            // Retry the reply, never the application's one-time OAuth callback.
+            while (true)
+            {
+                try
+                {
+                    await _current.ReplyAsync(id, requestId, response, cancel);
+                    return true;
+                }
+                catch (Exception e) when (IsUnreachable(e, cancel))
+                {
+                    if (!await RetryAsync(e, cancel))
+                        return false;
+                }
+            }
+        }
+
+        private async Task<bool> RetryAsync(Exception error, CancellationToken cancel)
+        {
+            Log.Warn($"{Name}: helper unreachable: {error.Message}");
             if (++_failures >= 15)
                 return false;
             await Task.Delay(retryDelay, cancel);
@@ -130,6 +149,8 @@ internal static class Relay
     /// <summary>Sends a request to the application's loopback listener and returns its response.</summary>
     public static async Task<HttpResponse> ForwardAsync(int port, HttpRequest request, CancellationToken cancel)
     {
+        if (!request.Target.StartsWith('/'))
+            return HttpResponse.Html(400, "Invalid callback", "Expected a path on the application's loopback listener.");
         var description = $"localhost:{port}: {request.Method} {OAuth.Redact(request.Target)}";
         using var message = new HttpRequestMessage(new HttpMethod(request.Method), $"http://localhost:{port}{request.Target}");
         if (request.Body.Length > 0)

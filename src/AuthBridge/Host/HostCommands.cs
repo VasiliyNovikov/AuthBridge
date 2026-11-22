@@ -45,10 +45,7 @@ internal static partial class HostCommands
     {
         if (await PingAsync() is not { } running)
             return false;
-        using var helper = Process.GetProcessById(running.Pid);
-        // Exiting through its tray icon lets the helper remove the icon and close its tunnels.
-        if (!TrayIcon.RequestExit(running.Pid) || !helper.WaitForExit(TimeSpan.FromSeconds(15)))
-            helper.Kill(entireProcessTree: true);
+        HelperControl.StopProcess(running.Pid, TrayIcon.RequestExit, TimeSpan.FromSeconds(15));
         Console.WriteLine($"authbridge helper stopped (pid {running.Pid})");
         return true;
     }
@@ -65,9 +62,8 @@ internal static partial class HostCommands
         }
         Console.WriteLine($"downloading authbridge {latest}");
         var package = await GitHubReleases.DownloadAsync(latest);
-        await StopAsync();
         var installation = InstalledPackage.CurrentUser;
-        installation.Install(package);
+        await installation.InstallAsync(package, StopAsync);
         Console.WriteLine($"updated {installation.Location} from {AppVersion.Release} to {latest}");
         if (await StartAsync(installation.Location) != 0)
             return 1;
@@ -92,8 +88,8 @@ internal static partial class HostCommands
     private static async Task<int> InstallRemoteAsync(string name, string[] ssh)
     {
         var machine = await RemoteClient.ProbeAsync(ssh);
-        await RemoteClient.UploadAsync(ssh, machine.Architecture);
-        Console.WriteLine($"installed {machine.Home}/.local/bin/authbridge");
+        var version = await machine.EnsureVersionAsync(AppVersion.Release, arch => RemoteClient.UploadAsync(ssh, arch), installIfMissing: true);
+        Console.WriteLine($"authbridge {version} at {machine.Home}/.local/bin/authbridge");
         var setup = await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --setup-shell");
         Console.Write(setup.OutputOrThrow("remote shell setup failed"));
 
@@ -102,17 +98,11 @@ internal static partial class HostCommands
         Console.WriteLine($"tunnel '{name}' saved to {HostConfig.FilePath}");
         if (await StartAsync(AppContext.BaseDirectory) != 0)
             return 1;
-        for (var attempt = 0; attempt < 15; attempt++)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(3));
-            var status = await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --status");
-            if (status.ExitCode == 0)
-            {
-                Console.Write(status.Output);
-                return 0;
-            }
-        }
-        return Program.Fail("the tunnel is not connected yet; check 'authbridge status'");
+        var status = await RemoteClient.WaitForTunnelAsync(name, PingAsync, command => Ssh.RunAsync(ssh, command), TimeSpan.FromSeconds(3));
+        if (status is null)
+            return Program.Fail("the tunnel is not connected yet; check 'authbridge status'");
+        Console.Write(status);
+        return 0;
     }
 
     /// <summary>Runs the client with the given arguments on a configured machine.</summary>

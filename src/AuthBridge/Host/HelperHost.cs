@@ -13,18 +13,22 @@ internal static partial class HelperHost
     public static async Task<int> RunAsync()
     {
         Log.Init("host.log", echo: !Console.IsErrorRedirected);
-        using var tunnels = new TunnelSet(Protocol.ControlPort);
-        await using var helper = new Helper(OpenBrowser, tunnels.Statuses, IdleSeconds);
-        try
-        {
-            helper.Start(Protocol.ControlPort);
-        }
-        catch (SocketException e)
-        {
-            Log.Info($"127.0.0.1:{Protocol.ControlPort} is unavailable ({e.Message}); another helper is probably running");
+        var settings = new HostSettings(HostConfig.FilePath, Log.Warn);
+        var initial = settings.Reload();
+        await using var tunnels = new TunnelSet(Protocol.ControlPort);
+        await using var helper = new Helper(url => OpenBrowser(url, settings.Current), tunnels.Statuses, IdleSeconds);
+        if (!TryStart(helper))
             return 1;
-        }
+        if (initial is not null)
+            await tunnels.UpdateAsync(initial.Targets);
         InstalledPackage.CurrentUser.DeleteReplacedFiles();
+        await RunUntilStoppedAsync(helper, settings, tunnels);
+        Log.Info("helper stopping");
+        return 0;
+    }
+
+    private static async Task RunUntilStoppedAsync(Helper helper, HostSettings settings, TunnelSet tunnels)
+    {
         var updates = new UpdateCheck(GitHubReleases.LatestAsync, AppVersion.Release);
         // A queued tray callback can safely signal even after the host has shut down.
         var stopRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -40,7 +44,7 @@ internal static partial class HelperHost
             using var tray = TrayIcon.Start(tunnels.Statuses, () => updates.Available, RequestStop);
             using var stopping = new CancellationTokenSource();
             Log.Info($"helper listening on 127.0.0.1:{helper.Port} (pid {Environment.ProcessId})");
-            var maintenance = MaintainAsync(helper, tunnels, updates, stopping.Token);
+            var maintenance = MaintainAsync(helper, settings, tunnels, updates, stopping.Token);
             await Task.WhenAny(stopRequested.Task, maintenance);
             await stopping.CancelAsync();
             await maintenance;
@@ -53,30 +57,37 @@ internal static partial class HelperHost
         {
             Console.CancelKeyPress -= OnCancel;
         }
-        Log.Info("helper stopping");
-        return 0;
     }
 
-    private static async Task MaintainAsync(Helper helper, TunnelSet tunnels, UpdateCheck updates, CancellationToken stopping)
+    private static bool TryStart(Helper helper)
     {
-        var lastConfigWrite = DateTime.MinValue;
+        try
+        {
+            helper.Start(Protocol.ControlPort);
+            return true;
+        }
+        catch (SocketException e)
+        {
+            Log.Info($"127.0.0.1:{Protocol.ControlPort} is unavailable ({e.Message}); another helper is probably running");
+            return false;
+        }
+    }
+
+    private static async Task MaintainAsync(Helper helper, HostSettings settings, TunnelSet tunnels, UpdateCheck updates, CancellationToken stopping)
+    {
         while (!stopping.IsCancellationRequested)
         {
             _ = updates.RefreshAsync(DateTime.UtcNow, stopping);
-            var configWrite = File.GetLastWriteTimeUtc(HostConfig.FilePath);
-            if (configWrite != lastConfigWrite)
-            {
-                tunnels.Update(HostConfig.Load().Targets);
-                lastConfigWrite = configWrite;
-            }
+            if (settings.Reload() is { } config)
+                await tunnels.UpdateAsync(config.Targets);
             await helper.ExpireAsync();
             await Task.Delay(TimeSpan.FromSeconds(5), stopping);
         }
     }
 
-    private static void OpenBrowser(string url)
+    private static void OpenBrowser(string url, HostConfig config)
     {
-        var info = HostConfig.Load().BrowserCommand is [var browser, .. var arguments]
+        var info = config.BrowserCommand is [var browser, .. var arguments]
             ? new ProcessStartInfo(browser, arguments.Select(argument => argument.Replace("{url}", url)))
             : new ProcessStartInfo(url) { UseShellExecute = true };
         Process.Start(info)?.Dispose();

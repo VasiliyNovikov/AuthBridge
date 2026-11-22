@@ -59,25 +59,28 @@ internal static class ClientCommands
         process.StandardInput.Close();
     }
 
-    private static async Task<int> RelayAsync(string socket, string session, int port)
+    private static async Task<int> RelayAsync(string socket, string session, int port, string? owner)
     {
         Posix.Detach();
         Log.Init("client.log");
         using var bridge = ControlClient.ForSocket(socket);
-        // A reconnected tunnel listens on a new socket, while the helper keeps the session for a while. The helpers of
-        // other PCs do not know the session.
-        PingResult? owner = null;
+        owner ??= await ReadOwnerAsync(bridge); // Workers launched by an older client have no owner argument.
+        await Relay.RunAsync(bridge, session, port, CancellationToken.None, async () => owner is null ? null :
+            (await Bridge.FindAsync(TimeSpan.FromSeconds(5), info => BrowserClient.OwnerKey(info) == owner))?.Client);
+        return 0;
+    }
+
+    private static async Task<string?> ReadOwnerAsync(ControlClient bridge)
+    {
         try
         {
-            owner = await bridge.PingAsync(TimeSpan.FromSeconds(5));
+            return await bridge.PingAsync(TimeSpan.FromSeconds(5)) is { } info ? BrowserClient.OwnerKey(info) : null;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
-            // Then any helper will do.
+            Log.Warn($"cannot identify the helper for this relay: {e.Message}");
+            return null;
         }
-        await Relay.RunAsync(bridge, session, port, CancellationToken.None, async () =>
-            (await Bridge.FindAsync(TimeSpan.FromSeconds(5), info => owner is null || (info.Machine, info.Pid) == (owner.Machine, owner.Pid)))?.Client);
-        return 0;
     }
 
     private static async Task<int> CancelAsync(int port, string url, string reason)

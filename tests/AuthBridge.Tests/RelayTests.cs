@@ -16,7 +16,7 @@ public sealed class RelayTests
     [TestCategory("Mutation")]
     public async Task ReadsOnlyTheDeclaredCallbackBody()
     {
-        const string Head = "POST /callback?x=1 HTTP/1.1\r\ncontent-length: 4\r\nX-Note: a:b\r\n\r\n";
+        const string Head = "POST /callback?x=1 HTTP/1.1\r\ncontent-length: 4\r\nContent-Length: 4\r\nX-Note: a:b\r\n\r\n";
         using var wire = new LimitedReadStream(Encoding.ASCII.GetBytes(Head + "bodyextra"), Head.Length + 2);
 
         var request = await Http.ReadRequestAsync(wire, CancellationToken.None);
@@ -37,6 +37,8 @@ public sealed class RelayTests
     [DataRow("GET\r\n\r\n", "request line")]
     [DataRow("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", "Chunked")]
     [DataRow("POST / HTTP/1.1\r\nContent-Length: -1\r\n\r\n", "body length")]
+    [DataRow("POST / HTTP/1.1\r\nContent-Length: unknown\r\n\r\n", "body length")]
+    [DataRow("POST / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 2\r\n\r\n", "body length")]
     public async Task ReaderRejectsRequestsItCannotFrame(string head, string reason)
     {
         using var stream = new MemoryStream(Encoding.ASCII.GetBytes(head));
@@ -154,6 +156,17 @@ public sealed class RelayTests
 
     [TestMethod]
     [TestCategory("Mutation")]
+    public async Task RelayAcceptsOnlyAPathOnTheWaitingApplication()
+    {
+        var response = await Relay.ForwardAsync(0, new HttpRequest("OPTIONS", "*", [], []), CancellationToken.None);
+        Assert.AreEqual(400, response.Status);
+        var page = Encoding.UTF8.GetString(response.Body);
+        StringAssert.Contains(page, "<title>Invalid callback</title>");
+        StringAssert.Contains(page, "loopback listener");
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
     public async Task IncompleteApplicationResponseReturnsARelayErrorInsteadOfAPartialSignInPage()
     {
         using var application = new TcpListener(IPAddress.Loopback, 0);
@@ -211,6 +224,17 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    [DataRow("{}")]
+    [DataRow("not a helper")]
+    public async Task AnUnrelatedEndpointDoesNotCountAsARunningHelper(string response)
+    {
+        await using var server = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), _ =>
+            Task.FromResult(new HttpResponse(200, [], Encoding.UTF8.GetBytes(response))));
+        using var client = ControlClient.ForPort(server.Port);
+        Assert.IsNull(await client.PingAsync(TimeSpan.FromSeconds(2)));
+    }
+
+    [TestMethod]
     [TestCategory("Mutation")]
     [DataRow(false)]
     [DataRow(true)]
@@ -230,7 +254,7 @@ public sealed class RelayTests
         Assert.AreEqual(0, await opener.OpenAsync(Open(relayPort), bridge));
         var worker = workers.Single();
         var session = worker[2];
-        CollectionAssert.AreEqual(new[] { "__relay", bridge.Client.Endpoint, session, relayPort.ToString() }, worker);
+        CollectionAssert.AreEqual(new[] { "__relay", bridge.Client.Endpoint, session, relayPort.ToString(), $"{Environment.ProcessId}@test PC" }, worker);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var relay = Relay.RunAsync(tunnelReconnects ? dropped : bridge.Client, session, application.Port, stop.Token,
             () => Task.FromResult<ControlClient?>(ControlClient.ForPort(helper.Port)));
@@ -286,6 +310,82 @@ public sealed class RelayTests
         var cancellable = Open(45678);
         Assert.AreEqual(0, await opener.OpenAsync(cancellable, null));
         CollectionAssert.AreEqual(new[] { "__cancel", "45678", cancellable.Url, "the Windows helper is not connected" }, workers.Single());
+    }
+
+    [TestMethod]
+    public async Task ASecondOpenCannotEvictAnActiveSessionOnTheSamePort()
+    {
+        await using var helper = StartHelper();
+        using var client = ControlClient.ForPort(helper.Port);
+        var request = Open(FreePort());
+        var original = await client.OpenAsync(request);
+        Assert.IsNotNull(original.Session);
+        Assert.AreEqual(409, (await client.OpenAsync(request with { Client = "second machine" })).Status);
+        Assert.IsFalse((await client.NextAsync(original.Session, 0, CancellationToken.None)).Closed);
+        await client.CloseAsync(original.Session);
+        Assert.AreEqual(200, (await client.OpenAsync(request)).Status);
+    }
+
+    [TestMethod]
+    public async Task RepeatedPollRecoversTheUnansweredRequestButNotAnAnsweredOne()
+    {
+        await using var helper = StartHelper();
+        using var client = ControlClient.ForPort(helper.Port);
+        var port = FreePort();
+        var session = (await client.OpenAsync(Open(port))).Session!;
+        using var browser = new HttpClient(new HttpClientHandler { UseProxy = false });
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var response = browser.GetStringAsync($"http://127.0.0.1:{port}/callback", stop.Token);
+        var pending = (await client.NextAsync(session, 3, stop.Token)).Request;
+        Assert.IsNotNull(pending);
+        Assert.AreEqual(pending.Id, (await client.NextAsync(session, 1, stop.Token)).Request?.Id);
+        await client.ReplyAsync(session, pending.Id, new HttpResponse(200, [], "done"u8.ToArray()), stop.Token);
+        Assert.AreEqual("done", await response);
+        Assert.IsNull((await client.NextAsync(session, 0, stop.Token)).Request);
+    }
+
+    [TestMethod]
+    public async Task LosingTheTunnelAfterDiscoveryCancelsTheWaitingApplication()
+    {
+        using var dropped = new Bridge.Connection(ControlClient.ForPort(FreePort()), new(Protocol.Version, 1, 0, []), DateTime.UtcNow);
+        var workers = new List<string[]>();
+        var browser = new BrowserClient(workers.Add, TextWriter.Null);
+        var request = Open(45678);
+        Assert.AreEqual(0, await browser.OpenAsync(request, dropped));
+        CollectionAssert.AreEqual(new[] { "__cancel", "45678", request.Url }, workers.Single()[..3]);
+    }
+
+    [TestMethod]
+    [TestCategory("Mutation")]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task AFailedReplyRetriesWithinBudgetWithoutReplayingTheCallback(bool recovers)
+    {
+        var calls = 0;
+        await using var application = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request =>
+        {
+            Interlocked.Increment(ref calls);
+            return Task.FromResult(new HttpResponse(200, [], request.Body));
+        });
+        var pending = new PendingRequest("request", new HttpRequest("POST", "/callback", [], "one use"u8.ToArray()));
+        await using var first = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(request.Method == "GET"
+            ? new HttpResponse(200, [], JsonSerializer.SerializeToUtf8Bytes(pending, Json.Default.PendingRequest))
+            : new HttpResponse(503, [], [])));
+        var replies = new ConcurrentQueue<HttpRequest>();
+        await using var next = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request =>
+        {
+            replies.Enqueue(request);
+            return Task.FromResult(new HttpResponse(recovers ? 204 : 503, [], []));
+        });
+        using var initial = ControlClient.ForPort(first.Port);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var session = new Relay.HelperSession(initial, "retry-session", () => Task.FromResult<ControlClient?>(ControlClient.ForPort(next.Port)), TimeSpan.Zero);
+        Assert.AreEqual(recovers, await session.PollAsync(application.Port, stop.Token));
+        Assert.AreEqual(recovers ? 1 : 14, replies.Count);
+        var delivered = replies.First();
+        Assert.AreEqual("/v1/sessions/retry-session/reply/request", delivered.Target);
+        CollectionAssert.AreEqual(pending.Request.Body, JsonSerializer.Deserialize(delivered.Body, Json.Default.HttpResponse)!.Body);
+        Assert.AreEqual(1, calls);
     }
 
     [TestMethod]

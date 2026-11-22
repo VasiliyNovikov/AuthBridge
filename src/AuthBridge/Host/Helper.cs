@@ -75,15 +75,13 @@ internal sealed class Helper(Action<string> openBrowser, Func<TunnelStatus[]> tu
 
     private async Task<HttpResponse> OpenAsync(OpenRequest request)
     {
-        if (request.Url.Length > 65536 || !Uri.TryCreate(request.Url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        if (request.Url is not { Length: <= 65536 } || !Uri.TryCreate(request.Url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             return Error(400, "only http and https URLs can be opened");
         RelaySession? session = null;
         if (request.RelayPort is { } port)
         {
             if (port is < 1 or > 65535)
                 return Error(400, "invalid relay port");
-            foreach (var previous in _sessions.Values.Where(s => s.Port == port))
-                await CloseAsync(previous);
             try
             {
                 session = await RelaySession.StartAsync(port);

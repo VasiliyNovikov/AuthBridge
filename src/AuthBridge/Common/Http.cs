@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 
@@ -73,17 +74,25 @@ internal static class Http
             throw new InvalidDataException("Malformed request line.");
         Header[] headers = [.. lines[1..].Select(line => line.Split(':', 2)).Where(parts => parts.Length == 2)
             .Select(parts => new Header(parts[0].Trim(), parts[1].Trim()))];
-        if (Find(headers, "Transfer-Encoding") is not null)
-            throw new InvalidDataException("Chunked requests are not supported.");
-        var contentLength = int.TryParse(Find(headers, "Content-Length"), out var value) ? value : 0;
-        if (contentLength is < 0 or > MaxBodyBytes)
-            throw new InvalidDataException("Invalid request body length.");
-
+        var contentLength = BodyLength(headers);
         var body = new byte[contentLength];
         var buffered = Math.Min(length - end - 4, contentLength);
         buffer.AsSpan(end + 4, buffered).CopyTo(body);
         await stream.ReadExactlyAsync(body.AsMemory(buffered), cancel);
         return new HttpRequest(method, target, headers, body);
+    }
+
+    private static int BodyLength(Header[] headers)
+    {
+        if (Find(headers, "Transfer-Encoding") is not null)
+            throw new InvalidDataException("Chunked requests are not supported.");
+        var lengths = headers.Where(h => h.Name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
+            .Select(h => h.Value).Distinct(StringComparer.Ordinal).ToArray();
+        if (lengths.Length == 0)
+            return 0;
+        if (lengths is [var text] && int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var length) && length <= MaxBodyBytes)
+            return length;
+        throw new InvalidDataException("Invalid request body length.");
     }
 
     public static async Task WriteResponseAsync(Stream stream, HttpResponse response, bool includeBody, CancellationToken cancel)

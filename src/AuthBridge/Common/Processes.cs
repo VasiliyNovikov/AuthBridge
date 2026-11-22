@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace AuthBridge.Common;
@@ -31,22 +32,60 @@ internal static class Processes
         return info;
     }
 
-    public static async Task<ProcessResult> RunAsync(string file, IEnumerable<string> arguments, Stream? input = null)
+    public static async Task<ProcessResult> RunAsync(string file, IEnumerable<string> arguments, Stream? input = null, CancellationToken cancel = default)
     {
+        cancel.ThrowIfCancellationRequested();
         using var process = Process.Start(StartInfo(file, arguments))!;
+        using var stop = cancel.Register(() => Stop(process));
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
         try
         {
-            if (input is not null)
-                await input.CopyToAsync(process.StandardInput.BaseStream);
-            process.StandardInput.Close();
+            await SendInputAsync(process, input, cancel);
+            await process.WaitForExitAsync(cancel);
         }
-        catch (IOException)
+        catch
         {
-            // The process exited early; its exit code and error output tell why.
+            Stop(process);
+            await process.WaitForExitAsync();
+            await Task.WhenAll(output, error);
+            cancel.ThrowIfCancellationRequested();
+            throw;
         }
-        await process.WaitForExitAsync();
+        cancel.ThrowIfCancellationRequested();
         return new(process.ExitCode, await output, await error);
+    }
+
+    private static async Task SendInputAsync(Process process, Stream? source, CancellationToken cancel)
+    {
+        using var stdin = process.StandardInput;
+        if (source is null)
+            return;
+        var buffer = new byte[64 * 1024];
+        int count;
+        while ((count = await source.ReadAsync(buffer, cancel)) > 0)
+        {
+            try
+            {
+                await stdin.BaseStream.WriteAsync(buffer.AsMemory(0, count), cancel);
+            }
+            catch (IOException) when (process.HasExited && process.ExitCode != 0)
+            {
+                return; // A rejected command can close its pipe early. Return its stderr and exit code.
+            }
+        }
+    }
+
+    private static void Stop(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception e) when ((e is InvalidOperationException or Win32Exception) && process.HasExited)
+        {
+            // The child exited during cancellation.
+        }
     }
 }

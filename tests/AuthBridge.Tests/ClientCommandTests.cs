@@ -8,11 +8,11 @@ public sealed class ClientCommandTests
 {
     private static ClientCommandLine Commands(Func<string[], bool, Task<int>>? open = null,
         Func<string, string[], Task<int>>? gcm = null, Func<string[], Task<int>>? nugetPlugin = null,
-        Func<string, string, int, Task<int>>? relay = null, Func<int, string, string, Task<int>>? cancel = null)
+        Func<string, string, int, string?, Task<int>>? relay = null, Func<int, string, string, Task<int>>? cancel = null)
     {
         static Task<int> Unexpected() => throw new AssertFailedException("Unexpected command invocation.");
         return new(open ?? ((_, _) => Unexpected()), gcm ?? ((_, _) => Unexpected()), nugetPlugin ?? (_ => Unexpected()),
-            relay ?? ((_, _, _) => Unexpected()), cancel ?? ((_, _, _) => Unexpected()), Cli.Command("--setup-shell", "", Unexpected));
+            relay ?? ((_, _, _, _) => Unexpected()), cancel ?? ((_, _, _) => Unexpected()), Cli.Command("--setup-shell", "", Unexpected));
     }
 
     [TestMethod]
@@ -101,18 +101,22 @@ public sealed class ClientCommandTests
     }
 
     [TestMethod]
-    public async Task WorkersReceiveTheTypedPortAndTheirOwnArguments()
+    [DataRow(null)]
+    [DataRow("42@test pc")]
+    public async Task WorkersReceiveTheTypedPortAndTheirOwnArguments(string? expectedOwner)
     {
-        var cli = Commands(relay: (socket, session, port) =>
+        var cli = Commands(relay: (socket, session, port, owner) =>
         {
             Assert.AreEqual(("socket", "session-id", 65535), (socket, session, port));
+            Assert.AreEqual(expectedOwner, owner);
             return Task.FromResult(17);
         }, cancel: (port, url, reason) =>
         {
             Assert.AreEqual((1, "https://login.example/", "not connected"), (port, url, reason));
             return Task.FromResult(23);
         });
-        Assert.AreEqual(17, await Cli.InvokeAsync(cli, ["__relay", "socket", "session-id", "65535"]));
+        string[] ownerArgument = expectedOwner is null ? [] : [expectedOwner];
+        Assert.AreEqual(17, await Cli.InvokeAsync(cli, ["__relay", "socket", "session-id", "65535", .. ownerArgument]));
         Assert.AreEqual(23, await Cli.InvokeAsync(cli, ["__cancel", "1", "https://login.example/", "not connected"]));
     }
 }

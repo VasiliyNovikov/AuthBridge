@@ -29,7 +29,8 @@ internal static class Program
         }
     }
 
-    internal static bool IsCommandError(Exception error) => error is Win32Exception or IOException or UnauthorizedAccessException or HttpRequestException;
+    internal static bool IsCommandError(Exception error) =>
+        error is Win32Exception or IOException or UnauthorizedAccessException or HttpRequestException or OperationCanceledException or InvalidDataException;
 
     internal static int Fail(string message)
     {

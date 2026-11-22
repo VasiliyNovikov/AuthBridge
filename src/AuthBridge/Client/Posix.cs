@@ -42,7 +42,7 @@ internal static unsafe partial class Posix
         }
     }
 
-    /// <summary>The command lines of the parent processes, for diagnostics.</summary>
+    /// <summary>Parent process names for diagnostics, without arguments that can carry sign-in secrets.</summary>
     public static string ParentChain(int depth = 3)
     {
         var chain = new List<string>();
@@ -55,13 +55,12 @@ internal static unsafe partial class Posix
                 pid = int.Parse(stat[(stat.LastIndexOf(')') + 2)..].Split(' ')[1]);
                 if (pid <= 1)
                     break;
-                var command = File.ReadAllText($"/proc/{pid}/cmdline").Replace('\0', ' ').Trim();
-                chain.Add(command[..Math.Min(command.Length, 200)]);
+                chain.Add(File.ReadAllText($"/proc/{pid}/comm").TrimEnd('\n'));
             }
         }
-        catch (Exception e) when (e is IOException or FormatException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException)
         {
-            // The process has exited.
+            // A parent may have exited or its proc entry may be restricted.
         }
         return string.Join(" <- ", chain);
     }
@@ -70,7 +69,7 @@ internal static unsafe partial class Posix
     public static string? Which(string name) =>
         (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries)
         .Select(directory => Path.Combine(directory, name))
-        .FirstOrDefault(path => File.Exists(path) && (File.GetUnixFileMode(path) & UnixFileMode.UserExecute) != 0);
+        .FirstOrDefault(path => File.Exists(path) && access(path, 1) == 0); // X_OK for the invoking user
 
     /// <summary>NULL-terminated array of UTF-8 strings.</summary>
     private static nint[] ToNative(string[] values, List<nint> allocated)
@@ -95,6 +94,9 @@ internal static unsafe partial class Posix
 
     [LibraryImport("libc")]
     private static partial uint getuid();
+
+    [LibraryImport("libc", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int access(string path, int mode);
 
     [LibraryImport("libc")]
     private static partial Passwd* getpwuid(uint uid);

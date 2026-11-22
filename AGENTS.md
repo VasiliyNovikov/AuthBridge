@@ -153,7 +153,11 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - Applications such as MSAL wait for their browser command to exit before they serve the redirect, so the client relays
   in a detached background process (`__relay`) that does not hold the caller's standard streams.
 - Each tunnel connection gets a new remote socket, so a relay whose tunnel dropped finds its helper again, by machine
-  name and process id, through the reconnect callback of `Relay.RunAsync`; the helper keeps the session meanwhile.
+  name and process id passed by the browser client, through the reconnect callback of `Relay.RunAsync`. Until the
+  reply arrives the helper retains the outstanding request; reconnecting workers retry the reply, not the OAuth callback.
+- Only mark a tunnel connected after the remote command confirms its forwarded socket. Client checks belong to that
+  connection and must be cancelled and awaited when it ends. An upload must verify both length and executable version
+  before comparing versions and renaming under the remote install lock.
 - With several Windows machines connected to one Linux machine, `Bridge` pings every tunnel socket at once and prefers
   the helper whose PC had keyboard or mouse input most recently (`GetLastInputInfo`), so that sign-ins open where the
   user is. The tunnel of a PC that has gone to sleep can accept connections without answering, so once one helper has

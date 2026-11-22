@@ -24,7 +24,8 @@ where you are already signed in, and relays the redirect back to the Linux machi
 ## Install
 
 Requirements: Windows with the OpenSSH client, and key-based SSH access to the Linux machine
-(`ssh -o BatchMode=yes <host> true` must succeed). Linux machines can be x64 or arm64.
+(`ssh -o BatchMode=yes <host> true` must succeed). Linux machines can be x64 or arm64. Client installation uses
+`flock` (util-linux) and GNU coreutils on Linux.
 
 ### With an AI agent
 
@@ -120,18 +121,20 @@ Windows 11 may first put it among the hidden icons; drag it to the taskbar to ke
 
 Logs are in `%USERPROFILE%\.authbridge\host.log` and `~/.authbridge/client.log`. Tunnels are kept in
 `%USERPROFILE%\.authbridge\config.json`, which also accepts a browser command such as
-`"browserCommand": ["C:\\Program Files\\Mozilla Firefox\\firefox.exe", "{url}"]`.
+`"browserCommand": ["C:\\Program Files\\Mozilla Firefox\\firefox.exe", "{url}"]`. If an edit is invalid, the running
+helper keeps its last valid settings and reports the error in `host.log`; correct the file to apply the change.
 
 ## Notes
 
-- To upgrade, run `authbridge update`. The helper replaces older clients on the Linux machines when their tunnels
-  connect, so machines that are offline catch up later; `authbridge status` shows each machine's client version.
+- To upgrade, run `authbridge update`. On each tunnel connection the helper checks the installed client.
+  An upload is verified before it replaces the previous executable; concurrent installs from updated helpers keep
+  the newer version. Offline machines catch up when they connect. `authbridge status` shows each machine's client version.
   Versions before 0.1.7 have no `update`; run the install command again instead.
 - Dropped SSH connections, for example while a VPN or tunnel service is down, reconnect by themselves: the helper
   retries at least once a minute for as long as needed. Sign-ins in progress continue over the new connection; sign-ins
   started while disconnected fail at once.
-- Windows reserves some port ranges, for example for Hyper-V. If an application picked such a port, its sign-in
-  fails at once and succeeds on retry.
+- Windows reserves some port ranges, for example for Hyper-V. If an application picks a reserved port, or one
+  already serving another sign-in, its new sign-in fails without interrupting the existing session.
 - For SSH hosts with a `RemoteCommand` in `~/.ssh/config`, add `-o RemoteCommand=none` to `install-remote`.
 - Several Windows machines, for example at home and at the office, can connect to the same Linux machine. Sign-ins
   open on the one whose keyboard or mouse was used most recently; `authbridge --status` on Linux shows which one that

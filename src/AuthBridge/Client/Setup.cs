@@ -50,10 +50,13 @@ internal static class Setup
 
     internal static async Task<int> ConfigureGcmAsync(string self, Func<string, string?> which, Func<string[], Task<ProcessResult>> git)
     {
-        var read = await git(["config", "--global", "--get-all", "credential.helper"]);
+        var read = await git(["config", "--global", "--get-all", "--null", "credential.helper"]);
         // git config --get-all exits with 1 and no output when the key is absent.
         var output = read is { ExitCode: 1, Output: "", Error: "" } ? "" : read.OutputOrThrow("cannot read git credential.helper");
-        string[] helpers = output.Length == 0 ? [] : output.TrimEnd('\n').Split('\n');
+        // Drop only the terminator. An empty helper resets Git's list, even at the end.
+        if (output.Length > 0 && !output.EndsWith('\0'))
+            throw new IOException("incomplete git credential.helper list");
+        string[] helpers = output.Length == 0 ? [] : output.Split('\0')[..^1];
         var wrapped = WrapGcmHelpers(helpers, self, which);
         if (wrapped.SequenceEqual(helpers))
         {
@@ -89,7 +92,11 @@ internal static class Setup
     [SupportedOSPlatform("linux")]
     public static async Task<int> AllAsync()
     {
-        var result = Math.Max(Shell(), await GcmAsync());
+        var result = Shell();
+        if (Posix.Which("git") is not null)
+            result = Math.Max(result, await GcmAsync());
+        else
+            Console.WriteLine("Git Credential Manager: skipped, Git is not installed");
         if (File.Exists(Wrappers.NuGetProviderDll))
             return Math.Max(result, NuGet());
         Console.WriteLine("NuGet: skipped, the Azure Artifacts credential provider is not installed");
@@ -115,12 +122,13 @@ internal static class Setup
     public static string[] WrapGcmHelpers(string[] helpers, string self, Func<string, string?> which) =>
         Array.ConvertAll(helpers, helper =>
         {
-            var parts = helper.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts is [] || parts[0].StartsWith('!') || parts.Contains("--gcm"))
+            var parts = helper.Split([' ', '\t'], 2, StringSplitOptions.RemoveEmptyEntries);
+            if (parts is [] || parts[0].StartsWith('!'))
                 return helper;
             var program = parts[0].StartsWith('/') ? parts[0] : which("git-credential-" + parts[0]);
             if (program is null || Path.GetFileName(program) is not ("git-credential-manager" or "git-credential-manager-core"))
                 return helper;
-            return string.Join(' ', [self, "--gcm", program, .. parts[1..]]);
+            // Git interprets a leading ! as a shell command. Keep both paths literal and the user's argument text intact.
+            return string.Join(' ', [$"!{PosixShell.Quote(self)}", "--gcm", PosixShell.Quote(program), .. parts[1..]]);
         });
 }

@@ -33,7 +33,7 @@ internal static class TrayUpdate
             {
                 return await update();
             }
-            catch (Exception e) when (Program.IsCommandError(e) || e is OperationCanceledException or InvalidDataException)
+            catch (Exception e) when (Program.IsCommandError(e))
             {
                 return Program.Fail($"authbridge: {e.Message}");
             }

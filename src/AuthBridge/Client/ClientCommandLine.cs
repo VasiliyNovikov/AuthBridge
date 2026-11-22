@@ -7,7 +7,7 @@ namespace AuthBridge.Client;
 internal sealed class ClientCommandLine : RootCommand
 {
     public ClientCommandLine(Func<string[], bool, Task<int>> open, Func<string, string[], Task<int>> gcm,
-        Func<string[], Task<int>> nugetPlugin, Func<string, string, int, Task<int>> relay,
+        Func<string[], Task<int>> nugetPlugin, Func<string, string, int, string?, Task<int>> relay,
         Func<int, string, string, Task<int>> cancel, params Command[] modes)
         : base("Supply one or more URLs to open in the Windows browser, or choose a command.")
     {
@@ -49,7 +49,7 @@ internal sealed class ClientCommandLine : RootCommand
         Add(nuget);
     }
 
-    private void AddWorkers(Func<string, string, int, Task<int>> relay, Func<int, string, string, Task<int>> cancel)
+    private void AddWorkers(Func<string, string, int, string?, Task<int>> relay, Func<int, string, string, Task<int>> cancel)
     {
         var port = new Argument<int>("port")
         {
@@ -64,8 +64,9 @@ internal sealed class ClientCommandLine : RootCommand
         };
         var socket = new Argument<string>("socket");
         var session = new Argument<string>("session");
-        var relayCommand = new Command(BrowserClient.RelayCommand) { Hidden = true, Arguments = { socket, session, port } };
-        relayCommand.SetAction((result, _) => relay(result.GetRequiredValue(socket), result.GetRequiredValue(session), result.GetRequiredValue(port)));
+        var owner = new Argument<string?>("owner") { Arity = ArgumentArity.ZeroOrOne };
+        var relayCommand = new Command(BrowserClient.RelayCommand) { Hidden = true, Arguments = { socket, session, port, owner } };
+        relayCommand.SetAction((result, _) => relay(result.GetRequiredValue(socket), result.GetRequiredValue(session), result.GetRequiredValue(port), result.GetValue(owner)));
         Add(relayCommand);
         var url = new Argument<string>("url");
         var reason = new Argument<string>("reason");

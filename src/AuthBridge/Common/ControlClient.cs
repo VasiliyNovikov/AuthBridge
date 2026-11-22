@@ -48,7 +48,20 @@ internal sealed class ControlClient : IDisposable
     public async Task<PingResult?> PingAsync(TimeSpan timeout, CancellationToken cancel = default)
     {
         var (status, body) = await SendAsync(HttpMethod.Get, "v1/ping", null, timeout, cancel);
-        return status == 200 ? JsonSerializer.Deserialize(body, Json.Default.PingResult) : null;
+        if (status != 200)
+            return null;
+        try
+        {
+            var info = JsonSerializer.Deserialize(body, Json.Default.PingResult);
+            if (info is { Version: Protocol.Version, Pid: > 0, Tunnels: not null } && !info.Tunnels.Contains(null))
+                return info;
+            Log.Warn($"invalid ping response from {Endpoint}");
+        }
+        catch (JsonException e)
+        {
+            Log.Warn($"invalid ping response from {Endpoint}: {e.Message}");
+        }
+        return null;
     }
 
     /// <summary>Opens a URL in the browser; Session identifies the relay session for a loopback redirect.</summary>
@@ -75,12 +88,19 @@ internal sealed class ControlClient : IDisposable
         {
             200 => (false, JsonSerializer.Deserialize(body, Json.Default.PendingRequest)),
             204 => (false, null),
-            _ => (true, null),
+            404 => (true, null),
+            _ => throw new HttpRequestException($"session poll failed: HTTP {status}", null, (HttpStatusCode)status),
         };
     }
 
-    public Task ReplyAsync(string session, string id, HttpResponse response, CancellationToken cancel) =>
-        SendAsync(HttpMethod.Post, $"v1/sessions/{session}/reply/{id}", JsonSerializer.SerializeToUtf8Bytes(response, Json.Default.HttpResponse), TimeSpan.FromSeconds(30), cancel);
+    public async Task ReplyAsync(string session, string id, HttpResponse response, CancellationToken cancel)
+    {
+        var (status, _) = await SendAsync(HttpMethod.Post, $"v1/sessions/{session}/reply/{id}",
+            JsonSerializer.SerializeToUtf8Bytes(response, Json.Default.HttpResponse), TimeSpan.FromSeconds(30), cancel);
+        // A retry can get 404 if the first reply arrived but its acknowledgement was lost.
+        if (status is not (204 or 404))
+            throw new HttpRequestException($"session reply failed: HTTP {status}", null, (HttpStatusCode)status);
+    }
 
     public Task CloseAsync(string session) => SendAsync(HttpMethod.Post, $"v1/sessions/{session}/close", [], TimeSpan.FromSeconds(5));
 

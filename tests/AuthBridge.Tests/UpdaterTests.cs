@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.IO.Compression;
+using System.Text;
 using AuthBridge.Common;
 using AuthBridge.Host;
 
@@ -25,25 +26,82 @@ public sealed class UpdaterTests
         Assert.AreEqual(new RemoteClient.Machine(architecture, "/home/dev", version), RemoteClient.Machine.Parse(output));
 
     [TestMethod]
-    public void IncompleteRemoteProbeDoesNotShiftFields() =>
-        Assert.ThrowsExactly<IOException>(() => RemoteClient.Machine.Parse("x86_64\n\n/unexpected-third-line\n"));
+    [DataRow("x86_64\n\n/unexpected-third-line\n")]
+    [DataRow("unsupported\n/home/dev\n")]
+    public void RemoteProbeRejectsInvalidMachineData(string output) =>
+        Assert.ThrowsExactly<IOException>(() => RemoteClient.Machine.Parse(output));
 
     [TestMethod]
-    [DataRow("1.2.2", true)]
-    [DataRow("1.2.3", false)]
-    [DataRow("1.2.4", false)]
-    [DataRow(null, false)]
-    public async Task ConnectingOnlyUploadsToAnInstalledOlderClient(string? installed, bool shouldUpload)
+    public async Task InstallVerificationCannotSucceedThroughAnotherMachinesTunnel()
+    {
+        var other = new TunnelStatus("other", "connected", "", DateTimeOffset.UtcNow, Socket: "/other.sock");
+        var target = other with { Name = "dev", Socket = "/home/team's dev/bridge.sock" };
+        PingResult Status(string state) => new(Protocol.Version, 1, 0, [other, target with { State = state }]);
+        var pings = new Queue<PingResult>([Status("connecting"), Status("connected"), Status("connected")]);
+        var attempts = 0;
+        var result = await RemoteClient.WaitForTunnelAsync("dev", () => Task.FromResult<PingResult?>(pings.Dequeue()), command =>
+        {
+            Assert.AreEqual("AUTHBRIDGE_SOCKET='/home/team'\\''s dev/bridge.sock' ~/.local/bin/authbridge --status", command);
+            return Task.FromResult(++attempts == 1 ? new ProcessResult(1, "", "not yet ready") : new ProcessResult(0, "verified", ""));
+        }, TimeSpan.Zero);
+        Assert.AreEqual("verified", result);
+        Assert.IsEmpty(pings);
+    }
+
+    [TestMethod]
+    [DataRow("1.2.2", false, true)]
+    [DataRow("1.2.3", false, false)]
+    [DataRow("1.2.4", true, false)]
+    [DataRow(null, false, false)]
+    [DataRow(null, true, true)]
+    public async Task RemoteSetupAndReconnectPreserveNewerClients(string? installed, bool explicitInstall, bool shouldUpload)
     {
         var machine = new RemoteClient.Machine("arm64", "/home/dev", installed);
         var uploads = new List<string>();
-        var reported = await machine.UpgradeIfOlderAsync("1.2.3", arch =>
+        var reported = await machine.EnsureVersionAsync("1.2.3", arch =>
         {
             uploads.Add(arch);
-            return Task.CompletedTask;
-        });
-        Assert.AreEqual(shouldUpload ? "1.2.3" : installed, reported);
+            return Task.FromResult("1.2.5"); // Another helper installed a newer client during the upload.
+        }, explicitInstall);
+        Assert.AreEqual(shouldUpload ? "1.2.5" : installed, reported);
         CollectionAssert.AreEqual(shouldUpload ? new[] { "arm64" } : Array.Empty<string>(), uploads.ToArray());
+    }
+
+    [TestMethod]
+    public async Task RemoteInstallRejectsTruncationOrWrongVersionAndCannotOverwriteANewerClient()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("Checks the actual remote install command in a POSIX shell.");
+            return;
+        }
+        var home = Directory.CreateTempSubdirectory("authbridge upload ");
+        try
+        {
+            async Task<ProcessResult> Upload(string advertised, string staged, bool truncate = false)
+            {
+                var bytes = Encoding.UTF8.GetBytes($"#!/bin/sh\nprintf '%s\\n' '{staged}+build'\n");
+                using var input = new MemoryStream(truncate ? bytes[..^1] : bytes);
+                var command = "export HOME=\"$1\"\n" + Ssh.Arguments(["unused"], RemoteClient.UploadCommand(bytes.Length, advertised))[^1];
+                return await Processes.RunAsync("sh", ["-c", command, "sh", home.FullName], input);
+            }
+            Assert.AreEqual("1.0.0", (await Upload("1.0.0", "1.0.0")).OutputOrThrow("install").Trim());
+            var dest = Path.Combine(home.FullName, ".local", "bin", "authbridge");
+            var original = File.ReadAllBytes(dest);
+            Assert.AreNotEqual(0, (await Upload("2.0.0", "2.0.0", truncate: true)).ExitCode);
+            Assert.AreNotEqual(0, (await Upload("2.0.0", "1.9.9")).ExitCode);
+            CollectionAssert.AreEqual(original, File.ReadAllBytes(dest));
+
+            var concurrent = await Task.WhenAll(Upload("1.2.0", "1.2.0"), Upload("1.10.0", "1.10.0"));
+            foreach (var result in concurrent)
+                result.OutputOrThrow("concurrent install");
+            Assert.AreEqual("1.10.0", (await Upload("1.2.0", "1.2.0")).OutputOrThrow("no downgrade").Trim());
+            Assert.AreEqual("1.10.0+build", (await Processes.RunAsync(dest, ["--version"])).OutputOrThrow("installed version").Trim());
+        }
+        finally
+        {
+            home.Delete(recursive: true);
+        }
     }
 
     [TestMethod]
@@ -141,7 +199,7 @@ public sealed class UpdaterTests
     }
 
     [TestMethod]
-    public void ReplacingAPackageKeepsAnOpenExecutableReadable()
+    public async Task ReplacingAPackageKeepsAnOpenExecutableReadable()
     {
         var directory = Directory.CreateTempSubdirectory("authbridge-install-");
         try
@@ -149,12 +207,13 @@ public sealed class UpdaterTests
             var path = Path.Combine(directory.FullName, "authbridge.exe");
             File.WriteAllBytes(path, [1]);
             using var running = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-            using var contents = new MemoryStream();
-            using (var zip = new ZipArchive(contents, ZipArchiveMode.Create, leaveOpen: true))
-            using (var entry = zip.CreateEntry("authbridge.exe").Open())
-                entry.WriteByte(2);
+            var package = new InstalledPackage(directory.FullName);
+            await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+                package.InstallAsync(ReleaseZip("authbridge.exe"), () => throw new AssertFailedException("Incomplete archive stopped the helper.")));
+            CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
 
-            new InstalledPackage(directory.FullName).Install(contents.ToArray());
+            await package.InstallAsync(ReleaseZip("authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE"),
+                () => Task.CompletedTask);
 
             Assert.AreEqual(1, running.ReadByte());
             CollectionAssert.AreEqual(new byte[] { 2 }, File.ReadAllBytes(path));
@@ -163,6 +222,20 @@ public sealed class UpdaterTests
         {
             directory.Delete(recursive: true);
         }
+    }
+
+    private static byte[] ReleaseZip(params string[] files)
+    {
+        using var contents = new MemoryStream();
+        using (var zip = new ZipArchive(contents, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var file in files)
+            {
+                using var entry = zip.CreateEntry(file).Open();
+                entry.WriteByte(2);
+            }
+        }
+        return contents.ToArray();
     }
 
     [TestMethod]

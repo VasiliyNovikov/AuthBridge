@@ -11,6 +11,8 @@ internal sealed class RelaySession : IAsyncDisposable
 {
     private readonly Channel<PendingRequest> _queue = Channel.CreateUnbounded<PendingRequest>();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<HttpResponse>> _replies = new();
+    private readonly SemaphoreSlim _poll = new(1);
+    private PendingRequest? _outstanding;
     private readonly CancellationTokenSource _closed = new();
     private readonly List<HttpServer> _servers = [];
 
@@ -58,7 +60,18 @@ internal sealed class RelaySession : IAsyncDisposable
         timeout.CancelAfter(wait);
         try
         {
-            return await _queue.Reader.ReadAsync(timeout.Token);
+            await _poll.WaitAsync(timeout.Token);
+            try
+            {
+                // A poll's response can be lost when SSH drops. Keep the same request until its reply arrives.
+                while (_outstanding is null || !_replies.TryGetValue(_outstanding.Id, out var reply) || reply.Task.IsCompleted)
+                    _outstanding = await _queue.Reader.ReadAsync(timeout.Token);
+                return _outstanding;
+            }
+            finally
+            {
+                _poll.Release();
+            }
         }
         catch (OperationCanceledException)
         {
