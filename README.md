@@ -13,13 +13,53 @@ where you are already signed in, and relays the redirect back to the Linux machi
 
 ## How it works
 
-- A helper on Windows keeps an SSH connection to each Linux machine, with a reverse tunnel from a private Unix
-  socket in `~/.authbridge` to the helper's control port.
-- On Linux, `BROWSER` points to `authbridge`, which passes URLs through the tunnel to the helper.
-- When a URL redirects to `http://localhost:PORT`, the helper listens on that port on Windows and relays the
-  browser's redirect to the application waiting on Linux.
-- When the redirect cannot be relayed (no helper connected, or Windows reserves the port), the application
-  receives an OAuth error at once instead of waiting.
+### Opening the Windows browser
+
+The Windows helper starts an SSH connection to each configured Linux machine. When a Linux CLI runs `authbridge`
+through `BROWSER`, its request travels the other way: from a private Unix socket in `~/.authbridge` on Linux to
+the helper's loopback control port on Windows.
+
+```mermaid
+flowchart LR
+    accTitle: Path of a browser request from Linux to Windows
+    subgraph linux["Remote Linux machine"]
+        app["CLI tool"] -->|sign-in URL| client["authbridge client"]
+        client --> socket["Unix socket"]
+    end
+    subgraph windows["Windows PC"]
+        helper["AuthBridge helper"] -->|opens sign-in URL| browser["Web browser"]
+    end
+    socket -->|reverse SSH tunnel| helper
+```
+
+### Returning the sign-in callback to Linux
+
+The browser's `localhost` is **Windows**, but the CLI is waiting on **Linux**. For a loopback redirect, the helper
+listens on the requested port on Windows *before* opening the browser. The Linux client starts a background relay
+and exits, so the CLI can serve the callback on the same port on its own machine.
+
+```mermaid
+sequenceDiagram
+    accTitle: One OAuth loopback callback across the two machines
+    participant App as Linux CLI
+    participant Relay as Linux relay
+    participant Helper as Windows helper
+    participant Browser as Windows browser
+    participant IdP as Identity provider
+
+    Relay->>Helper: Poll for a callback over the SSH tunnel
+    Browser->>IdP: Visit sign-in URL
+    IdP-->>Browser: After sign-in, return to localhost:PORT
+    Browser->>Helper: HTTP callback to Windows localhost:PORT
+    Helper-->>Relay: Return the pending callback request
+    Relay->>App: Forward it to Linux localhost:PORT
+    App-->>Relay: HTTP response
+    Relay->>Helper: Send the response over the tunnel
+    Helper-->>Browser: Return the CLI's response
+```
+
+If no helper is reachable or Windows cannot bind the port, the client uses the redirect URI and state, when
+available, to send the waiting CLI an OAuth error instead of leaving it to time out.
 
 ## Install
 

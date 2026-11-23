@@ -1,4 +1,28 @@
 <Solution>
-  <Project Path="src/AuthBridge/AuthBridge.csproj" />
-  <Project Path="tests/AuthBridge.Tests/AuthBridge.Tests.csproj" />
+  <Folder Name="/.github/" />
+  <Folder Name="/.github/workflows/">
+    <File Path=".github/workflows/build.yml" />
+  </Folder>
+  <Folder Name="/.sln/">
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="AGENTS.md" />
+    <File Path="check-mutation-score.cs" />
+    <File Path="code-metrics-baseline.props" />
+    <File Path="coupling.cs" />
+    <File Path="crap.cs" />
+    <File Path="Directory.Build.props" />
+    <File Path="dotnet-tools.json" />
+    <File Path="global.json" />
+    <File Path="install.ps1" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+    <File Path="release.cs" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/AuthBridge/AuthBridge.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AuthBridge.Tests/AuthBridge.Tests.csproj" />
+  </Folder>
 </Solution>
