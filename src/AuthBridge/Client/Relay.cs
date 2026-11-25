@@ -11,6 +11,7 @@ internal static class Relay
 {
     private const int PollSeconds = 10;
 
+    // Stryker disable once all : a reused test host initializes statics once, so these mutants would leak into other runs
     private static readonly HttpClient Local = new(new SocketsHttpHandler
     {
         UseProxy = false,

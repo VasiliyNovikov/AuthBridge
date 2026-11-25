@@ -92,6 +92,15 @@ the test passes the quoted path through a real `sh` and is skipped on other plat
 The relay target exercises forwarding, listener lifetime, session polling, reconnects and client ownership.
 Mutations Stryker cannot compile are reported separately and do not count as detected.
 
+`concurrency` runs 8 test hosts, twice the CI runner's 4 vCPUs, because most mutant runs wait on sockets, the relay's
+2-second retry or a hung test's timeout. The hosts run side by side, and each is reused for many mutants:
+
+- A test that needs connections refused holds its port with `ReserveClosedPort`. `FreePort` picks a port for the helper
+  to listen on below the operating systems' ephemeral ranges, because Linux often hands a port it has just released
+  to the next caller, even in another process.
+- Static initializers in mutated files carry `// Stryker disable once all`. A reused host never runs them again, and
+  a new host would keep a mutated value for later mutants, killing them falsely.
+
 The `mutation` job in `build.yml` runs on Ubuntu 24.04 x64 for pull requests, pushes to `main`, and `v*` tags.
 It uploads both reports as `mutation-reports`. A missing report, a target with no killed mutants, or an **overall
 mutation score** below the `detectedMutants / validMutants` baseline fails the build and blocks tagged releases.

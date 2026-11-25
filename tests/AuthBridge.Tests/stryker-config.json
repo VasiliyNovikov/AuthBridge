@@ -10,7 +10,7 @@
       "Client/Relay.cs"
     ],
     "test-case-filter": "TestCategory=Mutation",
-    "concurrency": 2,
+    "concurrency": 8,
     "reporters": ["html", "json"]
   }
 }

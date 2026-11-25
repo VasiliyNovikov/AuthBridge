@@ -144,7 +144,7 @@ public sealed class RelayTests
     [TestCategory("Mutation")]
     public async Task AClosedCallbackPortReturnsABrowserErrorButCallerCancellationPropagates()
     {
-        var port = FreePort();
+        using var closed = ReserveClosedPort(out var port);
         var request = new HttpRequest("GET", "/callback", [], []);
         var response = await Relay.ForwardAsync(port, request, CancellationToken.None);
         Assert.AreEqual(502, response.Status);
@@ -247,7 +247,8 @@ public sealed class RelayTests
         await using var helper = StartHelper();
         using var bridge = Connect(helper);
         // A dropped tunnel: nothing listens there any more, and the relay must find the helper again.
-        using var dropped = ControlClient.ForPort(FreePort());
+        using var closed = ReserveClosedPort(out var droppedPort);
+        using var dropped = ControlClient.ForPort(droppedPort);
         var relayPort = FreePort();
 
         var workers = new List<string[]>();
@@ -476,8 +477,9 @@ public sealed class RelayTests
         });
         using var bridge = ControlClient.ForPort(helper.Port);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var closed = ReserveClosedPort(out var applicationPort);
 
-        await Relay.RunAsync(bridge, session, FreePort(), stop.Token);
+        await Relay.RunAsync(bridge, session, applicationPort, stop.Token);
 
         Assert.IsFalse(stop.IsCancellationRequested);
         CollectionAssert.AreEqual(new[] { $"GET /v1/sessions/{session}/next", $"GET /v1/sessions/{session}/next",
@@ -712,10 +714,34 @@ public sealed class RelayTests
     private static OpenRequest Open(int port, bool includeState = true) =>
         new($"https://login.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A{port}" + (includeState ? "&state=test" : ""), port, DryRun: true, "test");
 
+    /// <summary>
+    /// A loopback port for the helper to listen on, below the ranges from which operating systems assign ports: Linux
+    /// often hands a port it has just released to the next caller, which may be another test process.
+    /// </summary>
     private static int FreePort()
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = Random.Shared.Next(20000, 32768);
+            try
+            {
+                using var listener = new TcpListener(IPAddress.Loopback, port);
+                listener.Start();
+                return port;
+            }
+            catch (SocketException) when (attempt < 100)
+            {
+                // Taken or reserved; try another port.
+            }
+        }
+    }
+
+    /// <summary>Binds a loopback port without listening, so connections are refused until the socket is disposed.</summary>
+    private static Socket ReserveClosedPort(out int port)
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+        return socket;
     }
 }

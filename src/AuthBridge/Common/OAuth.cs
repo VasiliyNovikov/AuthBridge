@@ -5,6 +5,7 @@ namespace AuthBridge.Common;
 /// <summary>Helpers for OAuth authorization URLs that redirect to a loopback listener (RFC 8252).</summary>
 internal static class OAuth
 {
+    // Stryker disable once all : a reused test host initializes statics once, so these mutants would leak into other runs
     private static readonly string[] DescribedParameters = ["client_id", "scope", "prompt", "response_mode"];
 
     /// <summary>The loopback port the URL or its redirect_uri points to: where the application waits for the redirect.</summary>

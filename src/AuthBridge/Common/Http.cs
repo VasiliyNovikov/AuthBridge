@@ -29,6 +29,7 @@ internal static class Http
     private const int MaxHeaderBytes = 64 << 10;
 
     // Every hop frames messages itself, so these headers are never relayed.
+    // Stryker disable once all : a reused test host initializes statics once, so these mutants would leak into other runs
     private static readonly HashSet<string> HopByHop = new(StringComparer.OrdinalIgnoreCase)
     {
         "Connection", "Keep-Alive", "Proxy-Connection", "Transfer-Encoding", "TE", "Trailer", "Upgrade", "Content-Length",
