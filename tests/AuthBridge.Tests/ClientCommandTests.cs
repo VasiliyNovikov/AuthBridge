@@ -16,6 +16,19 @@ public sealed class ClientCommandTests
     }
 
     [TestMethod]
+    [DataRow("--help")]
+    [DataRow("-h")]
+    public void RootHelpExplainsTheBrowserHandoffWithoutOpeningAnything(string option)
+    {
+        using var output = new StringWriter();
+        Assert.AreEqual(0, Commands().Parse([option]).Invoke(new() { Output = output }));
+        var help = output.ToString();
+        StringAssert.Contains(help, "For AI agents:");
+        StringAssert.Contains(help, "authbridge --status");
+        StringAssert.Contains(help, "eval \"$(authbridge --env)\"");
+    }
+
+    [TestMethod]
     [DoNotParallelize]
     public async Task VersionCommandPrintsTheFullBuildVersionWithoutContactingAHelper()
     {
@@ -50,6 +63,7 @@ public sealed class ClientCommandTests
             Console.SetError(errors);
             Assert.AreEqual(1, await Cli.InvokeAsync(Commands(), args));
             StringAssert.Contains(errors.ToString(), "Usage:");
+            Assert.DoesNotContain("For AI agents:", errors.ToString());
         }
         finally
         {

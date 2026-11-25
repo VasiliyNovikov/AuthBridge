@@ -3,7 +3,8 @@
 Run `dotnet test` from the repository root. [CI](.github/workflows/build.yml) runs the [MSTest suite](tests/AuthBridge.Tests)
 on Linux x64 and Arm64:
 
-- **Unit tests** check CLI argument handling, OAuth redirects and cancellation, helper selection, and update decisions.
+- **Unit tests** check CLI argument handling, including each platform's agent help without running command handlers.
+  They also cover OAuth redirects and cancellation, helper selection, and update decisions.
 - **Integration tests** send a callback through the helper and relay over real loopback sockets and check the
   application's response. They simulate tunnel drops to verify the callback is not replayed. Linux tests also run
   shell setup and upload commands through `sh`.

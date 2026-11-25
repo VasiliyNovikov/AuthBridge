@@ -132,7 +132,9 @@ Optional integrations, run on the Linux machine, or from Windows as `authbridge 
 
 ## Usage
 
-Run `authbridge --help` on either platform to see its commands and options.
+Run `authbridge --help` on either platform to see its commands and options. The **For AI agents** section shows how
+to check a named tunnel on Windows or hand off a Linux sign-in to the user's browser. From Windows,
+`authbridge remote NAME --help` shows the installed Linux client's help.
 
 | Windows | |
 | --- | --- |

@@ -8,6 +8,22 @@ namespace AuthBridge.Tests;
 public sealed class HostCommandTests
 {
     [TestMethod]
+    public void AgentHelpDescribesTheTargetCheckOnlyAtTheRoot()
+    {
+        static Task<int> Unexpected() => throw new AssertFailedException("Help ran a command.");
+        var cli = new HostCommandLine(Unexpected, (_, _) => Unexpected(), (_, _) => Unexpected());
+        using var root = new StringWriter();
+        Assert.AreEqual(0, cli.Parse("--help").Invoke(new() { Output = root }));
+        StringAssert.Contains(root.ToString(), "For AI agents:");
+        StringAssert.Contains(root.ToString(), "authbridge remote <name> --status");
+
+        using var remote = new StringWriter();
+        Assert.AreEqual(0, cli.Parse("remote --help").Invoke(new() { Output = remote }));
+        StringAssert.Contains(remote.ToString(), "Usage:");
+        Assert.DoesNotContain("For AI agents:", remote.ToString());
+    }
+
+    [TestMethod]
     public async Task ExtraOrMissingArgumentsDoNotRunCommands()
     {
         var actions = new List<string>();

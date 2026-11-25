@@ -15,6 +15,14 @@ internal sealed class HostCommandLine : RootCommand
             "SSH options followed by the destination.", installRemote));
         Add(RemoteCommand("remote", "Run the client on a configured Linux machine.", "arguments",
             "Arguments to the Linux client, for example --status.", remote));
+        Cli.AddAgentHelp(this, """
+              Run authbridge status first. Exit 0 means the helper answered; check that
+              the named tunnel is connected. To check from that Linux machine, run:
+                authbridge remote <name> --status
+              If asked to connect a new machine, use the user's SSH options and destination:
+                authbridge install-remote <name> [SSH options...] <destination>
+              Full setup: https://github.com/VasiliyNovikov/AuthBridge#with-an-ai-agent
+            """);
     }
 
     private static Command RemoteCommand(string verb, string description, string argumentName, string argumentDescription,

@@ -1,4 +1,6 @@
 using System.CommandLine;
+using System.CommandLine.Help;
+using System.CommandLine.Invocation;
 
 namespace AuthBridge;
 
@@ -20,6 +22,27 @@ internal static class Cli
 
     public static Argument<string[]> ForwardedArguments(string name, ArgumentArity arity) =>
         new(name) { Arity = arity, CaptureRemainingTokens = true };
+
+    public static void AddAgentHelp(RootCommand root, string instructions) =>
+        root.Options.OfType<HelpOption>().Single().Action = new AgentHelpAction(instructions);
+
+    private sealed class AgentHelpAction(string instructions) : SynchronousCommandLineAction
+    {
+        private readonly HelpAction standardHelp = new();
+        public override bool ClearsParseErrors => standardHelp.ClearsParseErrors;
+
+        public override int Invoke(ParseResult result)
+        {
+            var exitCode = standardHelp.Invoke(result);
+            if (result.CommandResult.Command is RootCommand && result.Errors.Count == 0)
+            {
+                var output = result.InvocationConfiguration.Output;
+                output.WriteLine("For AI agents:");
+                output.WriteLine(instructions);
+            }
+            return exitCode;
+        }
+    }
 
     public static Task<int> InvokeAsync(RootCommand root, string[] args)
     {

@@ -28,6 +28,14 @@ internal sealed class ClientCommandLine : RootCommand
             Add(mode);
         AddWrappers(gcm, nugetPlugin);
         AddWorkers(relay, cancel);
+        Cli.AddAgentHelp(this, """
+              Run authbridge --status first. It exits nonzero if no Windows helper answers.
+              If BROWSER is unset, run this in the same shell as the application's login:
+                eval "$(authbridge --env)"
+              Run the application's browser login (e.g. az login). Wait for that command,
+              not AuthBridge, to finish while the user signs in on Windows.
+              Do not paste sign-in URLs, codes, or tokens into chat.
+            """);
 
         foreach (var command in Subcommands)
             command.Validators.Add(result =>
