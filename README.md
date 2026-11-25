@@ -189,4 +189,7 @@ helper keeps its last valid settings and reports the error in `host.log`; correc
 
 ## Development
 
-See [AGENTS.md](AGENTS.md) for building, testing and the code layout.
+[ARCHITECTURE.md](https://github.com/VasiliyNovikov/AuthBridge/blob/main/ARCHITECTURE.md) describes process
+boundaries, the control protocol, and the relay lifecycle.
+[TESTING.md](https://github.com/VasiliyNovikov/AuthBridge/blob/main/TESTING.md) summarizes the test suites and manual checks.
+[AGENTS.md](https://github.com/VasiliyNovikov/AuthBridge/blob/main/AGENTS.md) covers build and test commands and the code layout.

@@ -2,6 +2,9 @@
 
 Guidance for AI agents and contributors working on this repository. User documentation is in `README.md`.
 
+Keep the [architecture specification](ARCHITECTURE.md) and [testing specification](TESTING.md) in sync with the
+code. If a change affects the design, behavior, or tests they describe, update the relevant spec in the same change.
+
 ## Build and test
 
 Requires the .NET 11 SDK (pinned in `global.json`).

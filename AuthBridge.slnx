@@ -7,6 +7,7 @@
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
     <File Path="AGENTS.md" />
+    <File Path="ARCHITECTURE.md" />
     <File Path="check-mutation-score.cs" />
     <File Path="code-metrics-baseline.props" />
     <File Path="coupling.cs" />
@@ -18,6 +19,7 @@
     <File Path="LICENSE" />
     <File Path="README.md" />
     <File Path="release.cs" />
+    <File Path="TESTING.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/AuthBridge/AuthBridge.csproj" />
