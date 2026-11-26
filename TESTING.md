@@ -1,13 +1,15 @@
 # Testing
 
 Run `dotnet test` from the repository root. [CI](.github/workflows/build.yml) runs the [MSTest suite](tests/AuthBridge.Tests)
-on Linux x64 and Arm64:
+on Linux x64 and Arm64 and on Windows x64:
 
 - **Unit tests** check CLI argument handling, including each platform's agent help without running command handlers.
   They also cover OAuth redirects and cancellation, helper selection, and update decisions.
 - **Integration tests** send a callback through the helper and relay over real loopback sockets and check the
   application's response. They simulate tunnel drops to verify the callback is not replayed. Linux tests also run
   shell setup and upload commands through `sh`.
+- **Windows tray tests** exercise the WinForms menu's saved check mark and stale update offer, then send real stop
+  and idle-update messages to a test tray thread. They do not install or stop the user's helper.
 
 CI runs two additional kinds of tests:
 
@@ -17,7 +19,8 @@ CI runs two additional kinds of tests:
   executable version, installs and reinstalls the helper, verifies logon and PATH registration, and checks status
   and graceful shutdown.
 
-On Linux x64, CI also uses test coverage for the CRAP complexity gate and checks Roslyn code metrics separately.
+On Linux x64, CI also uses native test coverage for the CRAP complexity gate. The separate Roslyn report targets
+the Windows build so it measures the WinForms host as well as the client sources.
 See [AGENTS.md](AGENTS.md#build-and-test) for commands and thresholds.
 
 **Manual end-to-end check:** With a live SSH tunnel and a Linux callback listener, run `authbridge --dry-run URL`

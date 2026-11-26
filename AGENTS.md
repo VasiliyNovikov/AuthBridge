@@ -13,12 +13,12 @@ Requires the .NET 11 SDK (pinned in `global.json`).
 dotnet test              # builds and runs the tests (MSTest on Microsoft.Testing.Platform)
 dotnet crap.cs           # runs the Release tests with coverage and checks the whole-app CRAP load
 dotnet coupling.cs       # reports and gates all six Roslyn code metrics
-dotnet release.cs 1.2.3  # self-contained, single-file, trimmed binaries and release zips in ./artifacts
+dotnet release.cs 1.2.3  # self-contained single-file binaries (trimmed on Linux) and release zips in ./artifacts
 ```
 
 Warnings are errors, including trimming warnings. CI (`.github/workflows/build.yml`) runs unit tests on x64 and Arm64
-Linux and builds all packages on Linux with `release.cs`. Each package runs on its native architecture: the Linux
-clients print their version, and the Windows runners check the executable's version resource, install the helper,
+Linux and x64 Windows, and builds all packages on Linux with `release.cs`. Each package runs on its native architecture:
+the Linux clients print their version, and the Windows runners check the executable's version resource, install the helper,
 repeat installation in place, verify its logon command and user PATH entry, and stop it. For a `vX.Y.Z` tag, CI
 publishes those same packages as a GitHub release.
 
@@ -69,8 +69,9 @@ project-wide config also enables CA1509 so malformed analyzer thresholds fail th
 checks. The test project and build scripts do not opt in. An ordinary build does not run the reporting script.
 
 The Ubuntu x64 job runs `dotnet coupling.cs` to check all six [Roslyn metrics](https://learn.microsoft.com/visualstudio/code-quality/code-metrics-values)
-in one Release compilation and produce the report. The build and report share thresholds, but the SDK does not
-diagnose generated source and CA1501 excludes `System` namespaces from the inheritance chain. The report retains
+in one Release compilation of the Windows target (including all client sources) and produce the report. The build
+and report share thresholds, but the SDK does not diagnose generated source and CA1501 excludes `System` namespaces
+from the inheritance chain. The report retains
 the full depth and counts generated members of partial types (notably the `Json` serialization context).
 Its method limits apply to methods, constructors and accessors with their own declaration in project source,
 excluding source-generator output and primary constructors, for which Roslyn reports the whole type's source span.
@@ -135,8 +136,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   related behavior together, and make control flow easy to follow.
 - Apply SOLID principles pragmatically: give each component a clear responsibility and make its dependencies explicit.
   Add an interface or layer only when it makes a concrete change easier to implement or test.
-- Use System.CommandLine for the CLI and otherwise use only the base class library. Register wire types in the
-  source-generated `Json` context in `Common/Protocol.cs`; on-disk Windows settings use `HostConfigJson` in `Host/HostConfig.cs`.
+- Use System.CommandLine for the CLI and WinForms for the Windows tray UI; otherwise use only the base class library.
+  Register wire types in the source-generated `Json` context in `Common/Protocol.cs`; on-disk Windows settings use
+  `HostConfigJson` in `Host/HostConfig.cs`.
 - Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version. When a tunnel
   first connects, the helper replaces an older client with the one in its package, and never downgrades one, so that
   helpers of different versions do not undo each other's updates.
@@ -149,16 +151,15 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   handles before it starts the helper; otherwise `authbridge start` never finishes when its output is redirected.
 - `release.cs` derives `authbridgew.exe` from `authbridge.exe` by setting the PE subsystem to GUI, so the helper
   started at logon has no console window.
-- `TrayIcon` uses raw Win32 because Windows Forms does not support trimming. Its window is hidden rather than
-  message-only, so that it receives `TaskbarCreated` after Explorer restarts. Closing the window stops the helper;
-  `authbridge stop` does that rather than killing the process, which would leave a stale icon.
+- Only the Windows target references WinForms and publishes untrimmed. `NotifyIcon` handles Explorer restarts.
+  The separate hidden control window keeps the `AuthBridgeTray` caption and stop/idle-update messages so a new
+  command can find and stop an older helper. Look up the caption and verify the PID, not the WinForms window class.
 - Automatic updates are opt-in. After staging a release, the automatic updater must get the tray's idle-close
   acknowledgement before replacing files. The helper checks the preference and active relays again at that point;
   a cached ping with zero sessions is not enough.
-- Windows 11 keeps an icon's first tooltip as its name, so `TrayIcon` adds the icon with the tooltip `AuthBridge`
+- Windows 11 keeps an icon's first tooltip as its name, so `StatusIcon` adds the icon with the tooltip `AuthBridge`
   before it sets the status.
-- `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon, which draws the
-  status dot onto its pixels. Keep its images below 256 pixels as uncompressed 32-bit bitmaps.
+- `AuthBridge.ico` is the executable's icon and, as an embedded resource, the base of the tray icon and the About image.
 - Windows cannot overwrite or delete a running or memory-mapped executable, even shortly after its process exits, but
   it can rename one. `InstalledPackage` therefore writes each new file beside the old one, renames the old one to
   `*.authbridge-old`, and moves the new one into place; the helper deletes the old files when it starts.

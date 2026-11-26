@@ -1,4 +1,8 @@
-using System.Runtime.InteropServices;
+#if WINDOWS
+using System.Diagnostics;
+using System.Drawing;
+using System.Windows.Forms;
+#endif
 using AuthBridge.Common;
 using AuthBridge.Host;
 
@@ -7,66 +11,6 @@ namespace AuthBridge.Tests;
 [TestClass]
 public sealed class TrayTests
 {
-    [TestMethod]
-    public void TrayRoutesSelectionRestartAndShutdownWithoutSwallowingWindowClose()
-    {
-        var calls = new List<string>();
-        const uint taskbarCreated = 0xC123;
-        var procedure = new TrayWindowProcedure(taskbarCreated, () => calls.Add("refresh"),
-            (x, y) => calls.Add($"menu {x} {y}"), () => calls.Add("close"), () => calls.Add("quit"), () => calls.Add("invalidate"),
-            pid => pid == 42);
-
-        Assert.AreEqual((nint)0, procedure.Handle(0x0113, 0, 0)); // WM_TIMER
-        Assert.AreEqual((nint)0, procedure.Handle(0x8001, (-20 << 16) | 0xFFF6, (1 << 16) | 0x0401)); // keyboard selection on a secondary monitor
-        Assert.IsNull(procedure.Handle(0x8001, 0, 0x0200)); // mouse movement
-        Assert.IsNull(procedure.Handle(taskbarCreated, 0, 0));
-        Assert.AreEqual((nint)0, procedure.Handle(0x8002, 41, 0));
-        Assert.AreEqual((nint)1, procedure.Handle(0x8002, 42, 0));
-        Assert.IsNull(procedure.Handle(0x0010, 0, 0)); // let Windows destroy the window
-        Assert.AreEqual((nint)0, procedure.Handle(0x0002, 0, 0));
-        CollectionAssert.AreEqual(new[] { "refresh", "menu -10 -20", "invalidate", "refresh", "close", "quit" }, calls.ToArray());
-    }
-
-    [TestMethod]
-    public void OpenAboutDialogReappliesTheThemeAndLetsWindowsPaintSystemColors()
-    {
-        var darkPreference = true;
-        var dark = false;
-        const int window = 7, dc = 8, darkBrush = 9;
-        var procedure = new AboutDialogProcedure(
-            dialog => { Assert.AreEqual((nint)window, dialog); dark = darkPreference; },
-            context => { Assert.AreEqual((nint)dc, context); return dark ? darkBrush : 0; },
-            (_, _) => Assert.Fail("Changing themes must not close About."));
-
-        Assert.AreEqual((nint)1, procedure.Handle(window, 0x0110, 0, 0)); // WM_INITDIALOG: set default focus
-        Assert.AreEqual((nint)darkBrush, procedure.Handle(window, 0x0138, dc, 0)); // static icon or text
-        darkPreference = false;
-        Assert.AreEqual((nint)0, procedure.Handle(window, 0x001A, 0, 0)); // WM_SETTINGCHANGE
-        Assert.AreEqual((nint)0, procedure.Handle(window, 0x0136, dc, 0)); // dialog background
-    }
-
-    [TestMethod]
-    [DataRow(0x0010, 0, 0)] // title-bar Close
-    [DataRow(0x0111, 2, 0)] // Esc
-    [DataRow(0x0111, 1, 123)] // button click
-    public void AboutDismissesOnCloseButNotOnUnrelatedControlNotifications(int message, int command, int control)
-    {
-        var ended = new List<(nint Window, int Result)>();
-        var procedure = new AboutDialogProcedure(_ => { }, _ => 0, (window, result) => ended.Add((window, result)));
-        Assert.AreEqual((nint)0, procedure.Handle(42, 0x0111, (6 << 16) | 2, 123)); // BN_SETFOCUS on IDCANCEL
-        Assert.IsEmpty(ended);
-        Assert.AreEqual((nint)1, procedure.Handle(42, (uint)message, command, control));
-        Assert.AreEqual(((nint)42, 1), ended.Single());
-    }
-
-    [TestMethod]
-    public void AboutKeepsSystemColorsForHighContrastOrUnreadablePreferences()
-    {
-        Assert.IsFalse(AboutTheme.UseDarkPalette(() => true, () => throw new InvalidOperationException("Do not read app colors in high contrast.")));
-        Assert.IsFalse(AboutTheme.UseDarkPalette(() => false, () => throw new UnauthorizedAccessException("Theme preference is restricted.")));
-        Assert.IsTrue(AboutTheme.UseDarkPalette(() => false, () => true));
-    }
-
     [TestMethod]
     public void MixedTunnelStatesUseThePartialConnectionColorAndListEachMachine()
     {
@@ -86,87 +30,76 @@ public sealed class TrayTests
         Assert.IsTrue(tip.Length <= 127);
     }
 
-    [TestMethod]
-    public void OpenMenuKeepsItsActionsWhenUpdateAvailabilityChanges()
+#if WINDOWS
+    [STATestMethod]
+    public async Task MenuReflectsTheSavedPreferenceAndRechecksTheDisplayedUpdate()
     {
-        var available = false;
-        var automatic = false;
-        var actions = new List<string>();
-        var menu = new TrayMenu(() => actions.Add("log"), () => available, () => actions.Add("update"),
-            () => automatic, enabled => automatic = enabled,
-            () => actions.Add("about"), () => actions.Add("exit"));
-        menu.Show(items =>
+        var directory = Directory.CreateTempSubdirectory("authbridge-menu-");
+        try
         {
-            CollectionAssert.AreEqual(new[] { "Open log", "Auto-update", "About", "Exit" }, items.Select(item => item.Label).ToArray());
-            Assert.IsFalse(items[1].Checked);
-            available = true;
-            return 3; // The visible item is still About.
-        });
-        menu.Show(items =>
+            var settings = new HostSettings(Path.Combine(directory.FullName, "config.json"), message => Assert.Fail(message));
+            var latest = "2.0";
+            var releases = new UpdateCheck(_ => Task.FromResult(latest), "1.0");
+            await using var helper = new Helper(_ => { }, () => [], () => null);
+            using var updates = new TrayUpdater(settings, releases, helper, _ => throw new AssertFailedException("Launched a stale update."));
+            using var about = AboutDialog.Create(SystemIcons.Application);
+            using var window = new TrayControlWindow(updates, () => Assert.Fail("Unexpected shutdown."));
+            using var menu = TrayMenu.Create(updates, about, window);
+            menu.Opening += (_, e) => e.Cancel = true; // Prepare the actual menu without displaying it.
+            var automatic = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Auto-update");
+            var update = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Update");
+
+            var now = DateTime.UtcNow;
+            await releases.RefreshAsync(now);
+            settings.SetUpdateAutomatically(true);
+            menu.Show(Point.Empty);
+            Assert.IsTrue(update.Available);
+            Assert.IsTrue(automatic.Checked);
+            latest = "1.0";
+            await releases.RefreshAsync(now.AddMinutes(5));
+            update.PerformClick();
+            automatic.PerformClick();
+            Assert.IsFalse(settings.UpdateAutomatically);
+            menu.Show(Point.Empty);
+            Assert.IsFalse(update.Available);
+            Assert.IsFalse(automatic.Checked);
+        }
+        finally
         {
-            CollectionAssert.AreEqual(new[] { "Open log", "Update", "Auto-update", "About", "Exit" }, items.Select(item => item.Label).ToArray());
-            return 2;
-        });
-        menu.Show(_ => { available = false; return 2; });
-        menu.Show(_ => 2); // Check the option while no update is offered.
-        menu.Show(items =>
-        {
-            Assert.AreEqual("Auto-update", items.Single(item => item.Checked).Label);
-            return 0;
-        });
-        Assert.IsTrue(automatic);
-        menu.Show(_ => 2);
-        Assert.IsFalse(automatic);
-        CollectionAssert.AreEqual(new[] { "about", "update" }, actions.ToArray());
+            directory.Delete(recursive: true);
+        }
     }
 
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public void WindowsPopupReflectsTheSavedCheckMark(bool enabled)
+    public async Task TrayAcknowledgesOnlyItsAutomaticUpdaterAndStopsThroughItsWindow(bool automatic)
     {
-        if (!OperatingSystem.IsWindows())
+        var directory = Directory.CreateTempSubdirectory("authbridge-tray-stop-");
+        try
         {
-            Assert.Inconclusive("Requires a Windows popup menu.");
-            return;
+            var settings = new HostSettings(Path.Combine(directory.FullName, "config.json"), message => Assert.Fail(message));
+            settings.SetUpdateAutomatically(automatic);
+            var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
+            await releases.RefreshAsync(DateTime.UtcNow);
+            await using var helper = new Helper(_ => { }, () => [], () => null);
+            var updates = new TrayUpdater(settings, releases, helper, _ => Process.GetCurrentProcess());
+            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var tray = TrayIcon.Start(() => [], updates, stopped.SetResult);
+            Assert.AreEqual(automatic, TrayControlWindow.RequestIdleExit(Environment.ProcessId));
+            if (!automatic)
+            {
+                Assert.IsFalse(stopped.Task.IsCompleted);
+                Assert.IsTrue(TrayControlWindow.RequestExit(Environment.ProcessId));
+            }
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
         }
-        TrayMenu.Item[] items = [new("Open log", () => { }), new("Auto-update", () => { }, enabled)];
-        TrayIcon.WithPopup(items, popup =>
+        finally
         {
-            var state = GetMenuState(popup, 2, 0); // MF_BYCOMMAND
-            Assert.AreNotEqual(uint.MaxValue, state);
-            Assert.AreEqual(enabled, (state & 0x0008) != 0); // MF_CHECKED
-            return 0;
-        });
+            directory.Delete(recursive: true);
+        }
     }
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    private static extern uint GetMenuState(nint menu, uint id, uint flags);
-
-    [TestMethod]
-    public void NotificationRetriesUntilExplorerAcceptsItAndReregistersAfterRestart()
-    {
-        var calls = new List<string>();
-        bool ready = false, present = false;
-        var notification = new TrayNotification(
-            tip => { calls.Add($"modify:{tip}"); return present; },
-            name => { calls.Add($"add:{name}"); return present = ready; });
-        var status = ("connected", 1u);
-        notification.Publish(status);
-        CollectionAssert.AreEqual(new[] { "modify:connected", "add:AuthBridge" }, calls.ToArray());
-
-        calls.Clear();
-        ready = true;
-        notification.Publish(status);
-        notification.Publish(status);
-        CollectionAssert.AreEqual(new[] { "modify:connected", "add:AuthBridge", "modify:connected" }, calls.ToArray());
-
-        calls.Clear();
-        present = false;
-        notification.Invalidate();
-        notification.Publish(status);
-        CollectionAssert.AreEqual(new[] { "modify:connected", "add:AuthBridge", "modify:connected" }, calls.ToArray());
-    }
+#endif
 
     [TestMethod]
     public async Task FailedAutomaticLaunchWaitsForAFreshCheckButManualRetryIsAvailable()

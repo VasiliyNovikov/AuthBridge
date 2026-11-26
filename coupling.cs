@@ -22,12 +22,14 @@ var baseline = XElement.Load("code-metrics-baseline.props").Elements("PropertyGr
     .ToDictionary(property => property.Name.LocalName, StringComparer.Ordinal);
 
 var projectPath = Path.Combine("src", "AuthBridge", "AuthBridge.csproj");
-using var restore = Process.Start(new ProcessStartInfo("dotnet", ["restore", projectPath]))!;
+// The Windows build also contains the client sources; the Linux build excludes the desktop UI.
+const string framework = "net11.0-windows";
+using var restore = Process.Start(new ProcessStartInfo("dotnet", ["restore", projectPath, $"-p:TargetFramework={framework}"]))!;
 await restore.WaitForExitAsync();
 if (restore.ExitCode != 0)
     return restore.ExitCode;
 
-using var workspace = MSBuildWorkspace.Create(new Dictionary<string, string> { ["Configuration"] = "Release" });
+using var workspace = MSBuildWorkspace.Create(new Dictionary<string, string> { ["Configuration"] = "Release", ["TargetFramework"] = framework });
 var project = await workspace.OpenProjectAsync(projectPath);
 var compilation = await project.GetCompilationAsync() ?? throw new InvalidDataException("Cannot compile the AuthBridge project.");
 var errors = workspace.Diagnostics.Where(d => d.Kind == WorkspaceDiagnosticKind.Failure).Select(d => d.Message)

@@ -11,10 +11,11 @@ internal static class Program
     {
         try
         {
+#if WINDOWS
+            return await Cli.InvokeAsync(HostCommands.CreateCommand(), args);
+#else
             RootCommand root;
-            if (OperatingSystem.IsWindows())
-                root = HostCommands.CreateCommand();
-            else if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux())
                 root = ClientCommands.CreateCommand();
             else
             {
@@ -22,6 +23,7 @@ internal static class Program
                 root.SetAction(_ => Fail("authbridge runs on Windows (helper) and Linux (client)."));
             }
             return await Cli.InvokeAsync(root, args);
+#endif
         }
         catch (Exception e) when (IsCommandError(e))
         {

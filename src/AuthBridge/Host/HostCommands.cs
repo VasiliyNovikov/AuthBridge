@@ -17,9 +17,9 @@ internal static partial class HostCommands
         TrayUpdate.CreateCommand(Paths.StateDir, UpdateAsync),
     };
 
-    private static HelperControl Control => new(PingAsync, Console.Out, Console.Error);
-    private static Task<int> StatusAsync() => Control.StatusAsync(Protocol.ControlPort);
-    private static Task<int> StartAsync(string folder) => Control.StartAsync(() => LaunchHelper(folder),
+    private static HelperControl CreateControl() => new(PingAsync, Console.Out, Console.Error);
+    private static Task<int> StatusAsync() => CreateControl().StatusAsync(Protocol.ControlPort);
+    private static Task<int> StartAsync(string folder) => CreateControl().StartAsync(() => LaunchHelper(folder),
         Path.Combine(Paths.StateDir, "host.log"), TimeSpan.FromMilliseconds(200));
 
     private static void LaunchHelper(string folder)
@@ -45,7 +45,7 @@ internal static partial class HostCommands
     {
         if (await PingAsync() is not { } running)
             return false;
-        HelperControl.StopProcess(running.Pid, TrayIcon.RequestExit, TimeSpan.FromSeconds(15));
+        HelperControl.StopProcess(running.Pid, TrayControlWindow.RequestExit, TimeSpan.FromSeconds(15));
         Console.WriteLine($"authbridge helper stopped (pid {running.Pid})");
         return true;
     }
@@ -92,7 +92,7 @@ internal static partial class HostCommands
         }
         // A sign-in may have started, or the user may have opted out, while the package was downloading.
         return await PingAsync() is { Sessions: 0 } running &&
-            HelperControl.StopProcess(running.Pid, TrayIcon.RequestIdleExit, TimeSpan.FromSeconds(15), requireApproval: true);
+            HelperControl.StopProcess(running.Pid, TrayControlWindow.RequestIdleExit, TimeSpan.FromSeconds(15), requireApproval: true);
     }
 
     /// <summary>Installs this package for the current user unless it runs from the installation, starts the helper now

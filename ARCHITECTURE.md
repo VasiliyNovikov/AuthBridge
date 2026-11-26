@@ -8,7 +8,7 @@ the authorization code, and manages its credentials. AuthBridge does not synchro
 
 ## Processes and connections
 
-[Program.cs](src/AuthBridge/Program.cs) selects the Windows or Linux commands of the same .NET application.
+[Program.cs](src/AuthBridge/Program.cs) selects the Windows or Linux commands of the same .NET project.
 There is a long-running helper on Windows, but no AuthBridge daemon on Linux.
 
 | Process | Responsibility |
@@ -114,12 +114,17 @@ sign-in secrets. URL logging strips the query and fragment; only selected, bound
   the optional browser command, and the automatic-update preference. [HostConfig](src/AuthBridge/Host/HostConfig.cs)
   serializes edits under a writer lock and replaces the file. The running helper retains the last valid settings
   on a malformed edit. `host.log` records helper activity; `update.log` records the latest tray update.
+- **Tray:** [TrayIcon](src/AuthBridge/Host/Tray/TrayIcon.cs) runs a WinForms message loop on an STA thread.
+  `NotifyIcon` manages the Explorer icon; a `ContextMenuStrip` and an About form use the system color mode selected
+  at startup. A separate hidden [control window](src/AuthBridge/Host/Tray/TrayControlWindow.cs) receives stop and
+  idle-update requests addressed to the helper's PID, even without Explorer or with About open.
 - **Linux:** The client is installed at `~/.local/bin/authbridge`. It locates `~/.authbridge` using the account's
   home directory rather than a caller's `$HOME`. This directory holds tunnel sockets, the client install lock,
   and `client.log`. Relay sessions, pending replies, and one-use browser links live in memory, not in either
   machine's configuration.
-- **Distribution:** [release.cs](release.cs) produces self-contained x64 and Arm64 packages. Each Windows package
-  carries the console and windowless forms of the same program and both Linux clients. `install-remote` performs
+- **Distribution:** [release.cs](release.cs) produces self-contained x64 and Arm64 packages. The Linux client is
+  trimmed and does not reference Windows Desktop. The Windows target bundles WinForms without trimming. Each Windows
+  package carries console and windowless copies of the same executable and both Linux clients. `install-remote` performs
   first installation. Each ready tunnel checks an existing client and upgrades it only if older; the check is
   cancelled and awaited when that connection ends. [RemoteClient](src/AuthBridge/Host/RemoteClient.cs) verifies
   the staged upload's length and executable version, then compares installed versions and renames under a remote

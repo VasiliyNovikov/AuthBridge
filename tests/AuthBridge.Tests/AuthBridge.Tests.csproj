@@ -2,7 +2,10 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.MTP" Version="10.1.0" PrivateAssets="all" />
-    <ProjectReference Include="..\..\src\AuthBridge\AuthBridge.csproj" />
+    <ProjectReference Include="..\..\src\AuthBridge\AuthBridge.csproj">
+      <!-- MSBuild probes references without the publish RID. Cross-target tests need the same platform as the app. -->
+      <SetTargetFramework Condition="'$(RuntimeIdentifier)' != ''">TargetFramework=$(TargetFramework)</SetTargetFramework>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

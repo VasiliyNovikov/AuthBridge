@@ -10,18 +10,28 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
     <DebugType>embedded</DebugType>
-    <!-- `dotnet publish -r <rid>` produces one self-contained, trimmed executable. -->
     <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
+    <PublishTrimmed Condition="'$(TargetFramework)' != 'net11.0-windows'">true</PublishTrimmed>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <ApplicationIcon>AuthBridge.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0-windows'">
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- The CLI needs a console; release.cs creates a separate windowless copy for logon. -->
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' != 'net11.0-windows'">
+    <Compile Remove="Host\Tray\**\*.cs;Host\HelperHost.cs;Host\HostCommands.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="3.0.0" />
     <!-- The tray icon adds a status dot to its images. -->
-    <EmbeddedResource Include="AuthBridge.ico" LogicalName="AuthBridge.ico" />
+    <EmbeddedResource Include="AuthBridge.ico" LogicalName="AuthBridge.ico" Condition="'$(UseWindowsForms)' == 'true'" />
     <InternalsVisibleTo Include="AuthBridge.Tests" />
   </ItemGroup>
 
