@@ -11,7 +11,7 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
     internal const string ReadyMarker = "authbridge: reverse forward ready";
     private readonly CancellationTokenSource _stopping = new();
     private readonly Lock _gate = new();
-    private volatile TunnelStatus _status = new(target.Name, "starting", "", DateTimeOffset.Now);
+    private volatile TunnelStatus _status = new(target.Name, TunnelStatus.Starting, "", DateTimeOffset.Now);
     private Task? _lifetime, _shutdown;
 
     public TunnelStatus Status => _status;
@@ -70,7 +70,7 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
                 "-R", $"{socket}:127.0.0.1:{controlPort}");
             var uptime = Stopwatch.StartNew();
             string errors;
-            SetStatus("connecting");
+            SetStatus(TunnelStatus.Connecting);
             try
             {
                 errors = await ConnectOnceAsync(arguments, socket);
@@ -82,7 +82,7 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
             if (_stopping.IsCancellationRequested)
                 break;
 
-            SetStatus("disconnected", errors.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "ssh exited");
+            SetStatus(TunnelStatus.Disconnected, errors.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "ssh exited");
             if (errors.Contains("forwarding failed", StringComparison.OrdinalIgnoreCase))
                 await PrepareRemoteDirectoryAsync();
             delay = NextRetryDelay(delay, uptime.Elapsed);
@@ -95,7 +95,7 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
                 break;
             }
         }
-        SetStatus("stopped");
+        SetStatus(TunnelStatus.Stopped);
     }
 
     internal static TimeSpan NextRetryDelay(TimeSpan previous, TimeSpan uptime) =>
@@ -115,7 +115,7 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
             {
                 if (line != ReadyMarker || _stopping.IsCancellationRequested)
                     continue;
-                SetStatus("connected", socket: socket);
+                SetStatus(TunnelStatus.Connected, socket: socket);
                 check = UpdateClientAsync(connected.Token);
                 await ssh.StandardOutput.BaseStream.CopyToAsync(Stream.Null);
                 break;
@@ -135,9 +135,8 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
         var directory = PosixShell.Quote(target.RemoteDir);
         try
         {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-            deadline.CancelAfter(TimeSpan.FromSeconds(45));
-            var result = await Ssh.RunAsync(target.Ssh, $"mkdir -p {directory} && chmod 700 {directory}", cancel: deadline.Token);
+            var result = await Ssh.RunAsync(target.Ssh, $"mkdir -p {directory} && chmod 700 {directory}",
+                timeout: Ssh.ShortCommandTimeout, cancel: _stopping.Token);
             result.OutputOrThrow("cannot prepare the remote socket directory");
         }
         catch (Exception e) when (e is Win32Exception or IOException or OperationCanceledException)
@@ -152,7 +151,7 @@ internal sealed class Tunnel(Target target, int controlPort, Func<string[], Proc
         {
             if (state == Status.State && detail == Status.Detail)
                 return;
-            _status = Status with { State = state, Detail = detail, Since = DateTimeOffset.Now, Socket = socket, Client = state == "connecting" ? "" : Status.Client };
+            _status = Status with { State = state, Detail = detail, Since = DateTimeOffset.Now, Socket = socket, Client = state == TunnelStatus.Connecting ? "" : Status.Client };
         }
         Log.Info($"tunnel {target.Name}: {state}{(detail.Length > 0 ? $" ({detail})" : "")}");
     }

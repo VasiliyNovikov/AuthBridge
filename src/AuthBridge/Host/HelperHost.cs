@@ -12,7 +12,7 @@ internal static partial class HelperHost
 {
     public static async Task<int> RunAsync()
     {
-        Log.Init("host.log", echo: !Console.IsErrorRedirected);
+        Log.Init(Log.HostFile, echo: !Console.IsErrorRedirected);
         var settings = new HostSettings(HostConfig.FilePath, Log.Warn);
         var initial = settings.Reload();
         await using var tunnels = new TunnelSet(Protocol.ControlPort);

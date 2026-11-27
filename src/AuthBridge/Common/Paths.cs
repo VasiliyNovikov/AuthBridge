@@ -4,8 +4,11 @@ namespace AuthBridge.Common;
 
 internal static class Paths
 {
+    /// <summary>The state directory's name in the account's home directory, on Windows and on each Linux machine.</summary>
+    public const string StateDirName = ".authbridge";
+
     /// <summary>The account's ~/.authbridge; on Linux independent of $HOME, which tools sometimes override.</summary>
-    public static string StateDir { get; } = Path.Combine(Home(), ".authbridge");
+    public static string StateDir { get; } = Path.Combine(Home(), StateDirName);
 
     public static void EnsureStateDir()
     {

@@ -1,33 +1,26 @@
 #!/usr/bin/env dotnet
-#:property PublishAot=false
+#:include eng/Repository.cs
 #:package Microsoft.CodeAnalysis.AnalyzerUtilities@5.6.0
 #:package Microsoft.CodeAnalysis.CSharp.Workspaces@5.12.0
 #:package Microsoft.CodeAnalysis.Workspaces.MSBuild@5.12.0
-using System.Diagnostics;
 using System.Text.Json;
-using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeMetrics;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.MSBuild;
 
-Directory.SetCurrentDirectory((string)AppContext.GetData("EntryPointFileDirectoryPath")!);
-var directory = Directory.CreateDirectory(Path.Combine("artifacts", "coupling"));
-var output = Path.Combine(directory.FullName, "report.json");
-var observedPath = Path.Combine(directory.FullName, "observed.json");
-File.Delete(output);
-File.Delete(observedPath);
-
-var baseline = XElement.Load("code-metrics-baseline.props").Elements("PropertyGroup").Elements()
-    .ToDictionary(property => property.Name.LocalName, StringComparer.Ordinal);
+// MSBuildWorkspace opens the project in this process.
+Directory.SetCurrentDirectory(Repository.Root);
+var output = Repository.Artifact("coupling", "report.json");
+var observedPath = Repository.Artifact("coupling", "observed.json");
+var baseline = Repository.LoadBaseline();
 
 var projectPath = Path.Combine("src", "AuthBridge", "AuthBridge.csproj");
 // The Windows build also contains the client sources; the Linux build excludes the desktop UI.
 const string framework = "net11.0-windows";
-using var restore = Process.Start(new ProcessStartInfo("dotnet", ["restore", projectPath, $"-p:TargetFramework={framework}"]))!;
-await restore.WaitForExitAsync();
-if (restore.ExitCode != 0)
-    return restore.ExitCode;
+var restore = Repository.Dotnet("restore", projectPath, $"-p:TargetFramework={framework}");
+if (restore != 0)
+    return restore;
 
 using var workspace = MSBuildWorkspace.Create(new Dictionary<string, string> { ["Configuration"] = "Release", ["TargetFramework"] = framework });
 var project = await workspace.OpenProjectAsync(projectPath);

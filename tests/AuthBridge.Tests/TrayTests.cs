@@ -5,6 +5,7 @@ using System.Windows.Forms;
 #endif
 using AuthBridge.Common;
 using AuthBridge.Host;
+using static AuthBridge.Tests.TestSupport;
 
 namespace AuthBridge.Tests;
 
@@ -34,58 +35,51 @@ public sealed class TrayTests
     [STATestMethod]
     public async Task MenuChecksOnDemandAndInstallsOnlyTheDisplayedOffer()
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-menu-");
-        try
-        {
-            var settings = new HostSettings(Path.Combine(directory.FullName, "config.json"), message => Assert.Fail(message));
-            string? latest = "1.0";
-            var releases = new UpdateCheck(_ => latest is null ? Task.FromException<string>(new HttpRequestException("offline")) : Task.FromResult(latest), "1.0");
-            await using var helper = new Helper(_ => { }, () => [], () => null);
-            var launches = new List<bool>();
-            using var updates = new TrayUpdater(settings, releases, helper, automatic => { launches.Add(automatic); return Process.GetCurrentProcess(); });
-            using var about = AboutDialog.Create(SystemIcons.Application);
-            using var status = new Form();
-            using var window = new TrayControlWindow(updates);
-            using var menu = new ContextMenuStrip();
-            var messages = new List<string>();
-            TrayMenu.Populate(menu, updates, status, about, window, messages.Add);
-            menu.Opening += (_, e) => e.Cancel = true; // Prepare the actual menu without displaying it.
-            var automatic = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Auto-update");
-            var now = DateTime.UtcNow;
-            await releases.RefreshAsync(now);
-            settings.SetUpdateAutomatically(true);
-            menu.Show(Point.Empty);
-            var update = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Check for updates");
-            Assert.IsTrue(update.Available && update.Enabled);
-            Assert.IsTrue(automatic.Checked);
+        using var directory = new TempDirectory("authbridge-menu-");
+        var settings = NewSettings(Path.Combine(directory.FullName, "config.json"));
+        string? latest = "1.0";
+        var releases = new UpdateCheck(_ => latest is null ? Task.FromException<string>(new HttpRequestException("offline")) : Task.FromResult(latest), "1.0");
+        await using var helper = NewHelper();
+        var launches = new List<bool>();
+        using var updates = new TrayUpdater(settings, releases, helper, automatic => { launches.Add(automatic); return Process.GetCurrentProcess(); });
+        using var about = AboutDialog.Create(SystemIcons.Application);
+        using var status = new Form();
+        using var window = new TrayControlWindow(updates);
+        using var menu = new ContextMenuStrip();
+        var messages = new List<string>();
+        TrayMenu.Populate(menu, updates, status, about, window, messages.Add);
+        menu.Opening += (_, e) => e.Cancel = true; // Prepare the actual menu without displaying it.
+        var automatic = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Auto-update");
+        var now = DateTime.UtcNow;
+        await releases.RefreshAsync(now);
+        settings.SetUpdateAutomatically(true);
+        menu.Show(Point.Empty);
+        var update = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Check for updates");
+        Assert.IsTrue(update.Available && update.Enabled);
+        Assert.IsTrue(automatic.Checked);
 
-            update.PerformClick();
-            StringAssert.Contains(messages[^1], "up to date");
-            latest = null;
-            update.PerformClick();
-            StringAssert.Contains(messages[^1], "Could not check");
-            latest = "2.0";
-            update.PerformClick(); // Do not wait for the next scheduled check, even after a failure.
-            StringAssert.Contains(messages[^1], "2.0");
-            Assert.AreEqual("Update to 2.0", update.Text);
-            latest = "3.0";
-            await releases.RefreshAsync(now.AddMinutes(6));
-            update.PerformClick();
-            Assert.IsEmpty(launches); // Neither checking nor clicking a stale version installs anything.
-            automatic.PerformClick();
-            Assert.IsFalse(settings.UpdateAutomatically);
-            menu.Show(Point.Empty);
-            Assert.IsFalse(automatic.Checked);
-            Assert.AreEqual("Update to 3.0", update.Text);
-            update.PerformClick();
-            CollectionAssert.AreEqual(new[] { false }, launches);
-            Assert.IsTrue(update.Available);
-            Assert.IsFalse(update.Enabled);
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        update.PerformClick();
+        StringAssert.Contains(messages[^1], "up to date");
+        latest = null;
+        update.PerformClick();
+        StringAssert.Contains(messages[^1], "Could not check");
+        latest = "2.0";
+        update.PerformClick(); // Do not wait for the next scheduled check, even after a failure.
+        StringAssert.Contains(messages[^1], "2.0");
+        Assert.AreEqual("Update to 2.0", update.Text);
+        latest = "3.0";
+        await releases.RefreshAsync(now.AddMinutes(6));
+        update.PerformClick();
+        Assert.IsEmpty(launches); // Neither checking nor clicking a stale version installs anything.
+        automatic.PerformClick();
+        Assert.IsFalse(settings.UpdateAutomatically);
+        menu.Show(Point.Empty);
+        Assert.IsFalse(automatic.Checked);
+        Assert.AreEqual("Update to 3.0", update.Text);
+        update.PerformClick();
+        CollectionAssert.AreEqual(new[] { false }, launches);
+        Assert.IsTrue(update.Available);
+        Assert.IsFalse(update.Enabled);
     }
 
     [STATestMethod]
@@ -95,8 +89,8 @@ public sealed class TrayTests
         var dev = new TunnelStatus("dev", "connected", "", since, "1.2.3", "/dev.sock");
         var build = new TunnelStatus("build", "disconnected", "network unavailable", since);
         var snapshot = new PingResult(Protocol.Version, 42, 2, [dev, build], "workstation");
-        await using var helper = new Helper(_ => { }, () => [], () => null);
-        var settings = new HostSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()), message => Assert.Fail(message));
+        await using var helper = NewHelper();
+        var settings = NewSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
         using var updates = new TrayUpdater(settings, new UpdateCheck(_ => Task.FromResult("1.0"), "1.0"), helper);
         using var status = new StatusDialog(SystemIcons.Application, 12345, () => snapshot);
         using var about = new Form();
@@ -142,30 +136,22 @@ public sealed class TrayTests
     [DataRow(true)]
     public async Task TrayAcknowledgesOnlyItsAutomaticUpdaterAndStopsThroughItsWindow(bool automatic)
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-tray-stop-");
-        try
+        using var directory = new TempDirectory("authbridge-tray-stop-");
+        var settings = NewSettings(Path.Combine(directory.FullName, "config.json"));
+        settings.SetUpdateAutomatically(automatic);
+        var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
+        await releases.RefreshAsync(DateTime.UtcNow);
+        await using var helper = StartHelper();
+        var updates = new TrayUpdater(settings, releases, helper, _ => Process.GetCurrentProcess());
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var tray = TrayIcon.Start(helper, updates, stopped.SetResult);
+        Assert.AreEqual(automatic, TrayControlWindow.RequestIdleExit(Environment.ProcessId));
+        if (!automatic)
         {
-            var settings = new HostSettings(Path.Combine(directory.FullName, "config.json"), message => Assert.Fail(message));
-            settings.SetUpdateAutomatically(automatic);
-            var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
-            await releases.RefreshAsync(DateTime.UtcNow);
-            await using var helper = new Helper(_ => { }, () => [], () => null);
-            helper.Start(0);
-            var updates = new TrayUpdater(settings, releases, helper, _ => Process.GetCurrentProcess());
-            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var tray = TrayIcon.Start(helper, updates, stopped.SetResult);
-            Assert.AreEqual(automatic, TrayControlWindow.RequestIdleExit(Environment.ProcessId));
-            if (!automatic)
-            {
-                Assert.IsFalse(stopped.Task.IsCompleted);
-                Assert.IsTrue(TrayControlWindow.RequestExit(Environment.ProcessId));
-            }
-            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.IsFalse(stopped.Task.IsCompleted);
+            Assert.IsTrue(TrayControlWindow.RequestExit(Environment.ProcessId));
         }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 #endif
 
@@ -176,8 +162,8 @@ public sealed class TrayTests
         var checks = 0;
         using var stopping = new CancellationTokenSource();
         var releases = new UpdateCheck(_ => { checks++; return pending.Task; }, "1.0", stopping.Token);
-        await using var helper = new Helper(_ => { }, () => [], () => null);
-        var settings = new HostSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()), message => Assert.Fail(message));
+        await using var helper = NewHelper();
+        var settings = NewSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
         using var tray = new TrayUpdater(settings, releases, helper, _ => throw new AssertFailedException("Checking should not install."));
         var poll = releases.RefreshAsync(DateTime.UtcNow);
         var check = tray.CheckOrUpdateAsync(null);
@@ -196,36 +182,29 @@ public sealed class TrayTests
     [TestMethod]
     public async Task FailedAutomaticLaunchWaitsForAFreshCheckButManualRetryIsAvailable()
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-auto-retry-");
-        try
-        {
-            var settings = new HostSettings(Path.Combine(directory.FullName, "config.json"), message => Assert.Fail(message));
-            var offline = false;
-            var releases = new UpdateCheck(_ => offline ? Task.FromException<string>(new HttpRequestException("offline")) : Task.FromResult("2.0"), "1.0");
-            await using var helper = new Helper(_ => { }, () => [], () => null);
-            var attempts = new List<bool>();
-            using var tray = new TrayUpdater(settings, releases, helper, automatic => { attempts.Add(automatic); throw new IOException("launch failed"); });
-            tray.SetUpdateAutomatically(true);
-            tray.Refresh();
-            Assert.IsEmpty(attempts);
-            var now = DateTime.UtcNow;
-            await releases.RefreshAsync(now);
-            tray.Refresh();
-            tray.Refresh();
-            offline = true;
-            await releases.RefreshAsync(now.AddMinutes(5));
-            tray.Refresh();
-            CollectionAssert.AreEqual(new[] { true }, attempts);
-            offline = false;
-            await releases.RefreshAsync(now.AddMinutes(15));
-            tray.Refresh();
-            tray.SetUpdateAutomatically(false);
-            await tray.CheckOrUpdateAsync("2.0");
-            CollectionAssert.AreEqual(new[] { true, true, false }, attempts);
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        using var directory = new TempDirectory("authbridge-auto-retry-");
+        var settings = NewSettings(Path.Combine(directory.FullName, "config.json"));
+        var offline = false;
+        var releases = new UpdateCheck(_ => offline ? Task.FromException<string>(new HttpRequestException("offline")) : Task.FromResult("2.0"), "1.0");
+        await using var helper = NewHelper();
+        var attempts = new List<bool>();
+        using var tray = new TrayUpdater(settings, releases, helper, automatic => { attempts.Add(automatic); throw new IOException("launch failed"); });
+        tray.SetUpdateAutomatically(true);
+        tray.Refresh();
+        Assert.IsEmpty(attempts);
+        var now = DateTime.UtcNow;
+        await releases.RefreshAsync(now);
+        tray.Refresh();
+        tray.Refresh();
+        offline = true;
+        await releases.RefreshAsync(now.AddMinutes(5));
+        tray.Refresh();
+        CollectionAssert.AreEqual(new[] { true }, attempts);
+        offline = false;
+        await releases.RefreshAsync(now.AddMinutes(15));
+        tray.Refresh();
+        tray.SetUpdateAutomatically(false);
+        await tray.CheckOrUpdateAsync("2.0");
+        CollectionAssert.AreEqual(new[] { true, true, false }, attempts);
     }
 }

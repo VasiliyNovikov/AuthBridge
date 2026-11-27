@@ -12,39 +12,32 @@ public sealed class SetupTests
     [DataRow(true, true, ".bash_profile")]
     public void ShellSetupUpdatesOnlyTheActiveLoginFileAndBashrc(bool bashProfile, bool bashLogin, string active)
     {
-        var home = Directory.CreateTempSubdirectory("authbridge-shell-");
-        try
-        {
-            const string original = "export KEEP=this\n";
-            const string executable = "/home/team's tools/authbridge";
-            List<string> profiles = [".profile"];
-            if (bashProfile) profiles.Add(".bash_profile");
-            if (bashLogin) profiles.Add(".bash_login");
-            foreach (var profile in profiles)
-                File.WriteAllText(Path.Combine(home.FullName, profile), original);
+        using var home = new TempDirectory("authbridge-shell-");
+        const string original = "export KEEP=this\n";
+        const string executable = "/home/team's tools/authbridge";
+        List<string> profiles = [".profile"];
+        if (bashProfile) profiles.Add(".bash_profile");
+        if (bashLogin) profiles.Add(".bash_login");
+        foreach (var profile in profiles)
+            File.WriteAllText(Path.Combine(home.FullName, profile), original);
 
-            using var output = new StringWriter();
-            Setup.ConfigureShell(home.FullName, executable, output);
-            var export = Setup.ExportBrowser(executable);
-            var login = Path.Combine(home.FullName, active);
-            var bashrc = Path.Combine(home.FullName, ".bashrc");
-            Assert.AreEqual(Setup.WithBlock(original, export), File.ReadAllText(login));
-            Assert.AreEqual(Setup.WithBlock("", export), File.ReadAllText(bashrc));
-            foreach (var file in profiles.Where(name => name != active))
-                Assert.AreEqual(original, File.ReadAllText(Path.Combine(home.FullName, file)));
-            StringAssert.Contains(output.ToString(), $"eval \"$({PosixShell.Quote(executable)} --env)\"");
+        using var output = new StringWriter();
+        Setup.ConfigureShell(home.FullName, executable, output);
+        var export = Setup.ExportBrowser(executable);
+        var login = Path.Combine(home.FullName, active);
+        var bashrc = Path.Combine(home.FullName, ".bashrc");
+        Assert.AreEqual(Setup.WithBlock(original, export), File.ReadAllText(login));
+        Assert.AreEqual(Setup.WithBlock("", export), File.ReadAllText(bashrc));
+        foreach (var file in profiles.Where(name => name != active))
+            Assert.AreEqual(original, File.ReadAllText(Path.Combine(home.FullName, file)));
+        StringAssert.Contains(output.ToString(), $"eval \"$({PosixShell.Quote(executable)} --env)\"");
 
-            var stamp = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            File.SetLastWriteTimeUtc(login, stamp);
-            File.SetLastWriteTimeUtc(bashrc, stamp);
-            Setup.ConfigureShell(home.FullName, executable, TextWriter.Null);
-            Assert.AreEqual(stamp, File.GetLastWriteTimeUtc(login));
-            Assert.AreEqual(stamp, File.GetLastWriteTimeUtc(bashrc));
-        }
-        finally
-        {
-            home.Delete(recursive: true);
-        }
+        var stamp = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(login, stamp);
+        File.SetLastWriteTimeUtc(bashrc, stamp);
+        Setup.ConfigureShell(home.FullName, executable, TextWriter.Null);
+        Assert.AreEqual(stamp, File.GetLastWriteTimeUtc(login));
+        Assert.AreEqual(stamp, File.GetLastWriteTimeUtc(bashrc));
     }
 
     [TestMethod]
@@ -71,15 +64,11 @@ public sealed class SetupTests
 
     [TestMethod]
     [TestCategory("Mutation")]
+    [OSCondition(OperatingSystems.Linux, IgnoreMessage = "Requires a POSIX shell.")]
     [DataRow("")]
     [DataRow("/my other browser")]
     public async Task BrowserExportPassesTheChosenLiteralPathToChildShells(string existing)
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            Assert.Inconclusive("Requires a POSIX shell.");
-            return;
-        }
         const string executable = "/home/team's $tools/authbridge";
         var script = $"BROWSER=$1; {Setup.ExportBrowser(executable)}; sh -c 'printf %s \"$BROWSER\"'";
         var result = await Processes.RunAsync("sh", ["-c", script, "sh", existing]);

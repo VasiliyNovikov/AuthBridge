@@ -1,14 +1,11 @@
 #!/usr/bin/env dotnet
+#:include eng/Repository.cs
 // Publishes self-contained, single-file binaries and release packages to ./artifacts.
 // Usage: dotnet release.cs [version]
-using System.Diagnostics;
 using System.IO.Compression;
-using System.Runtime.InteropServices;
 
 var version = args is [var value] ? value : "0.0.0-dev";
-var root = (string)AppContext.GetData("EntryPointFileDirectoryPath")!;
-// The dotnet whose runtime runs this script; started in the repository, it uses the SDK from global.json.
-var dotnet = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+var root = Repository.Root;
 var artifacts = Path.Combine(root, "artifacts");
 var staging = Path.Combine(artifacts, "staging");
 if (Directory.Exists(artifacts))
@@ -38,10 +35,7 @@ Directory.Delete(staging, recursive: true);
 string Publish(string rid)
 {
     var output = Path.Combine(staging, rid);
-    string[] arguments = ["publish", "src/AuthBridge", "-c", "Release", "-r", rid, "-o", output, $"-p:Version={version}"];
-    using var publish = Process.Start(new ProcessStartInfo(dotnet, arguments) { WorkingDirectory = root })!;
-    publish.WaitForExit();
-    if (publish.ExitCode != 0)
+    if (Repository.Dotnet("publish", "src/AuthBridge", "-c", "Release", "-r", rid, "-o", output, $"-p:Version={version}") != 0)
         throw new InvalidOperationException($"Publishing {rid} failed.");
     return output;
 }

@@ -6,21 +6,12 @@ internal static class AboutDialog
 {
     public static Form Create(Icon icon)
     {
-        var form = new Form
-        {
-            Text = "About AuthBridge",
-            Icon = icon,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            MaximizeBox = false,
-            MinimizeBox = false,
-            ShowInTaskbar = false,
-            StartPosition = FormStartPosition.CenterScreen,
-            KeyPreview = true,
-            AutoScaleMode = AutoScaleMode.Dpi,
-            AutoScaleDimensions = new SizeF(96, 96),
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        };
+        var form = TrayDialog.Create("About AuthBridge", icon);
+        form.FormBorderStyle = FormBorderStyle.FixedDialog;
+        form.MaximizeBox = false;
+        form.KeyPreview = true;
+        form.AutoSize = true;
+        form.AutoSizeMode = AutoSizeMode.GrowAndShrink;
         var layout = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, Padding = new Padding(16) };
         var image = icon.ToBitmap();
         var picture = new PictureBox { Image = image, SizeMode = PictureBoxSizeMode.AutoSize, Margin = new Padding(0, 0, 16, 0) };

@@ -7,6 +7,9 @@ namespace AuthBridge.Client;
 [SupportedOSPlatform("linux")]
 internal static class ClientCommands
 {
+    /// <summary>How long the client waits for a Windows helper to answer.</summary>
+    private static readonly TimeSpan HelperTimeout = TimeSpan.FromSeconds(5);
+
     public static ClientCommandLine CreateCommand() => new(OpenAllAsync, Wrappers.GcmAsync, Wrappers.NuGetPluginAsync,
         RelayAsync, CancelAsync,
         Cli.Command("--status", "Show the connections to Windows helpers.", StatusAsync),
@@ -18,7 +21,7 @@ internal static class ClientCommands
 
     private static async Task<int> StatusAsync()
     {
-        var connections = await Bridge.FindAllAsync(TimeSpan.FromSeconds(5));
+        var connections = await Bridge.FindAllAsync(HelperTimeout);
         if (connections.Count == 0)
             return Program.Fail("authbridge: not connected to the Windows helper");
         var role = "sign-ins open on";
@@ -34,7 +37,7 @@ internal static class ClientCommands
 
     private static async Task<int> OpenAllAsync(string[] urls, bool dryRun)
     {
-        Log.Init("client.log");
+        Log.Init(Log.ClientFile);
         var browser = new BrowserClient(StartWorker, Console.Error);
         var result = 0;
         foreach (var url in urls)
@@ -44,11 +47,11 @@ internal static class ClientCommands
 
     private static async Task<int> OpenAsync(BrowserClient browser, string url, bool dryRun)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+        if (!OpenRequest.CanOpen(url))
             return Program.Fail($"authbridge: only http and https URLs can be opened in the Windows browser: {url}");
         Log.Info($"open {OAuth.Redact(url)} {OAuth.Describe(url)} requested by {Posix.ParentChain()}");
         var request = new OpenRequest(url, OAuth.LoopbackPort(url), dryRun, Environment.MachineName);
-        using var bridge = await Bridge.FindAsync(TimeSpan.FromSeconds(5));
+        using var bridge = await Bridge.FindAsync(HelperTimeout);
         return await browser.OpenAsync(request, bridge);
     }
 
@@ -61,12 +64,11 @@ internal static class ClientCommands
 
     private static async Task<int> RelayAsync(string socket, string session, int port, string? owner)
     {
-        Posix.Detach();
-        Log.Init("client.log");
+        DetachWorker();
         using var bridge = ControlClient.ForSocket(socket);
         owner ??= await ReadOwnerAsync(bridge); // Workers launched by an older client have no owner argument.
         await Relay.RunAsync(bridge, session, port, CancellationToken.None, async () => owner is null ? null :
-            (await Bridge.FindAsync(TimeSpan.FromSeconds(5), info => BrowserClient.OwnerKey(info) == owner))?.Client);
+            (await Bridge.FindAsync(HelperTimeout, info => BrowserClient.OwnerKey(info) == owner))?.Client);
         return 0;
     }
 
@@ -74,7 +76,7 @@ internal static class ClientCommands
     {
         try
         {
-            return await bridge.PingAsync(TimeSpan.FromSeconds(5)) is { } info ? BrowserClient.OwnerKey(info) : null;
+            return await bridge.PingAsync(HelperTimeout) is { } info ? BrowserClient.OwnerKey(info) : null;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
@@ -85,10 +87,16 @@ internal static class ClientCommands
 
     private static async Task<int> CancelAsync(int port, string url, string reason)
     {
-        Posix.Detach();
-        Log.Init("client.log");
+        DetachWorker();
         if (OAuth.CancelRequest(url, port, reason) is { } request)
             await Relay.ForwardAsync(port, request, CancellationToken.None);
         return 0;
+    }
+
+    /// <summary>A worker leaves the caller's session, so that signals for its terminal do not stop it.</summary>
+    private static void DetachWorker()
+    {
+        Posix.Detach();
+        Log.Init(Log.ClientFile);
     }
 }

@@ -43,7 +43,7 @@ internal sealed class TrayUpdater(HostSettings settings, UpdateCheck releases, H
         try
         {
             if (!await releases.RefreshAsync(DateTime.UtcNow, force: true))
-                return "Could not check for updates. See host.log for details.";
+                return $"Could not check for updates. See {Log.HostFile} for details.";
             return AvailableVersion is { } version ? $"AuthBridge {version} is available." : "AuthBridge is up to date.";
         }
         catch (OperationCanceledException)

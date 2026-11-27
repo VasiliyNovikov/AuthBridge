@@ -24,6 +24,10 @@ publishes those same packages as a GitHub release.
 
 `code-metrics-baseline.props` is the single source for the Roslyn, CRAP and mutation gate thresholds.
 
+The root scripts are file-based apps that share `eng/Repository.cs` through `#:include`. It finds the repository root,
+reads that baseline, clears outputs that an earlier run left in `artifacts/`, and starts child builds with the `dotnet`
+that runs the script, so that they use the SDK from `global.json`.
+
 ### CRAP baseline
 
 The Ubuntu 24.04 x64 test job runs `dotnet crap.cs` instead of running the tests twice. The script restores the
@@ -105,7 +109,8 @@ Mutations Stryker cannot compile are reported separately and do not count as det
 The `mutation` job in `build.yml` runs on Ubuntu 24.04 x64 for pull requests, pushes to `main`, and `v*` tags.
 It uploads both reports as `mutation-reports`. A missing report, a target with no killed mutants, or an **overall
 mutation score** below the `detectedMutants / validMutants` baseline fails the build and blocks tagged releases.
-There are no per-file score floors. To check a report from the repo root, run `dotnet check-mutation-score.cs <mutation-report.json>`.
+There are no per-file score floors. From the repo root, `dotnet check-mutation-score.cs <mutation-report.json>` applies
+both report checks. Use a report from Linux: elsewhere `Common/PosixShell.cs` has no killed mutants.
 
 The gate compares the exact fraction of detected mutants (killed or timed out) among valid mutants (detected,
 survived, or not covered); the displayed percentages are rounded only for readability. We enforce 80/100,
@@ -126,7 +131,10 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
   shell, Git Credential Manager and NuGet setup and wrappers.
 - `src/AuthBridge/Common/`: minimal HTTP/1.1 server and messages, control API protocol and client, OAuth URL helpers,
   release version information (`AppVersion`), logging and paths.
-- `tests/AuthBridge.Tests/`: a few focused tests, including an in-process relay round trip (`RelayTests`).
+- `tests/AuthBridge.Tests/`: a few focused tests, including an in-process relay round trip (`RelayTests`). Reuse the
+  setup in `TestSupport.cs`: temporary directories, loopback servers, helpers, settings and console redirection.
+- `eng/Repository.cs`: what the root file-based apps (`crap.cs`, `coupling.cs`, `release.cs` and
+  `check-mutation-score.cs`) share.
 - `install.ps1`: the installer behind `irm ... | iex`. It only downloads the latest release and runs its
   `authbridge install`, and it must also run in Windows PowerShell 5.1.
 

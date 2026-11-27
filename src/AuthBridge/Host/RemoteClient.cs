@@ -5,6 +5,12 @@ namespace AuthBridge.Host;
 /// <summary>The Linux client on a remote machine, in ~/.local/bin/authbridge.</summary>
 internal static class RemoteClient
 {
+    /// <summary>The client's path in the remote home directory.</summary>
+    public const string HomePath = ".local/bin/authbridge";
+
+    /// <summary>The client in a remote shell command.</summary>
+    public const string Executable = "~/" + HomePath;
+
     /// <summary>A remote machine's architecture, home directory, and client version, which is null without a client.</summary>
     public sealed record Machine(string Architecture, string Home, string? Version)
     {
@@ -33,10 +39,8 @@ internal static class RemoteClient
     public static async Task<Machine> ProbeAsync(IEnumerable<string> ssh, CancellationToken cancel = default)
     {
         // A client that cannot tell its version counts as version 0, which any release replaces.
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        deadline.CancelAfter(TimeSpan.FromSeconds(45));
         var probe = await Ssh.RunAsync(ssh, "uname -m; printf '%s\\n' \"$HOME\"; " +
-            "if [ -x ~/.local/bin/authbridge ]; then ~/.local/bin/authbridge --version 2>/dev/null || echo 0; fi", cancel: deadline.Token);
+            $"if [ -x {Executable} ]; then {Executable} --version 2>/dev/null || echo 0; fi", timeout: Ssh.ShortCommandTimeout, cancel: cancel);
         return Machine.Parse(probe.OutputOrThrow("cannot query the remote machine"));
     }
 
@@ -62,10 +66,10 @@ internal static class RemoteClient
 
     private static string? StatusCommand(PingResult? local, string name)
     {
-        var tunnel = local?.Tunnels.FirstOrDefault(t => t.Name == name && t.State == "connected");
+        var tunnel = local?.Tunnels.FirstOrDefault(t => t.Name == name && t.State == TunnelStatus.Connected);
         if (tunnel is null)
             return null;
-        const string status = "~/.local/bin/authbridge --status";
+        const string status = $"{Executable} --status";
         // Older helpers don't publish the socket. At least require their local tunnel to be connected.
         return tunnel.Socket is { Length: > 0 } socket ? $"AUTHBRIDGE_SOCKET={PosixShell.Quote(socket)} {status}" : status;
     }
@@ -78,7 +82,7 @@ internal static class RemoteClient
         {
             await Task.Delay(interval);
             info = await ping();
-            if (info is null || info.Tunnels.All(tunnel => tunnel.State == "disconnected" || (tunnel.State == "connected" && !string.IsNullOrEmpty(tunnel.Client))))
+            if (info is null || info.Tunnels.All(tunnel => tunnel.State == TunnelStatus.Disconnected || (tunnel.State == TunnelStatus.Connected && !string.IsNullOrEmpty(tunnel.Client))))
                 break;
         }
         return info;
@@ -87,13 +91,11 @@ internal static class RemoteClient
     /// <summary>Installs the client that matches this helper.</summary>
     public static async Task<string> UploadAsync(IEnumerable<string> ssh, string architecture, CancellationToken cancel = default)
     {
-        var client = Path.Combine(AppContext.BaseDirectory, $"authbridge-linux-{architecture}");
+        var client = Path.Combine(AppContext.BaseDirectory, InstalledPackage.LinuxClientName(architecture));
         if (!File.Exists(client))
             throw new IOException($"no client for {architecture}: {client} is missing");
         await using var binary = File.OpenRead(client);
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        deadline.CancelAfter(TimeSpan.FromMinutes(10));
-        var upload = await Ssh.RunAsync(ssh, UploadCommand(binary.Length, AppVersion.Release), binary, deadline.Token);
+        var upload = await Ssh.RunAsync(ssh, UploadCommand(binary.Length, AppVersion.Release), binary, TimeSpan.FromMinutes(10), cancel);
         var installed = upload.OutputOrThrow("upload failed").Trim();
         if (installed.Length == 0 || AppVersion.IsNewer(AppVersion.Release, installed))
             throw new IOException($"remote install did not confirm client version {AppVersion.Release}");

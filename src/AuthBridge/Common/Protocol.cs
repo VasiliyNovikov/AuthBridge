@@ -13,7 +13,11 @@ internal static class Protocol
     public static readonly int ControlPort = int.TryParse(Environment.GetEnvironmentVariable("AUTHBRIDGE_PORT"), out var port) ? port : 28561;
 }
 
-internal sealed record OpenRequest(string Url, int? RelayPort, bool DryRun, string Client);
+internal sealed record OpenRequest(string Url, int? RelayPort, bool DryRun, string Client)
+{
+    /// <summary>Only absolute http and https URLs are opened in the browser.</summary>
+    public static bool CanOpen(string url) => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+}
 
 internal sealed record OpenResult(string? Session);
 
@@ -24,7 +28,11 @@ internal sealed record ErrorResult(string Error);
 internal sealed record PingResult(int Version, int Pid, int Sessions, TunnelStatus[] Tunnels, string? Machine = null, int? IdleSeconds = null);
 
 /// <summary>A tunnel's state; <c>Client</c> is the remote client's version once the helper has checked it.</summary>
-internal sealed record TunnelStatus(string Name, string State, string Detail, DateTimeOffset Since, string Client = "", string? Socket = null);
+internal sealed record TunnelStatus(string Name, string State, string Detail, DateTimeOffset Since, string Client = "", string? Socket = null)
+{
+    // The values of State.
+    public const string Starting = "starting", Connecting = "connecting", Connected = "connected", Disconnected = "disconnected", Stopped = "stopped";
+}
 
 /// <summary>A browser request waiting in a relay session for the remote client's answer.</summary>
 internal sealed record PendingRequest(string Id, HttpRequest Request);

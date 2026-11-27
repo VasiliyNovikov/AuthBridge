@@ -7,29 +7,27 @@ namespace AuthBridge.Host;
 internal sealed class InstalledPackage(string location)
 {
     private const string ReplacedSuffix = ".authbridge-old";
+    private const string ConsoleName = "authbridge.exe", WindowlessName = "authbridgew.exe";
 
     /// <summary>The files of a Windows package, as release.cs creates it.</summary>
-    private static readonly string[] PackageFiles = ["authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE"];
+    private static readonly string[] PackageFiles = [ConsoleName, WindowlessName, LinuxClientName("x64"), LinuxClientName("arm64"), "README.md", "LICENSE"];
+
+    /// <summary>The file name of the Linux client for an architecture, x64 or arm64, which install-remote and tunnels upload.</summary>
+    public static string LinuxClientName(string architecture) => $"authbridge-linux-{architecture}";
 
     public static InstalledPackage CurrentUser { get; } =
         new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "AuthBridge"));
 
     public string Location { get; } = location;
 
-    private string ConsoleExecutable => Path.Combine(Location, "authbridge.exe");
-    private string? WindowlessExecutable
-    {
-        get
-        {
-            var path = Path.Combine(Location, "authbridgew.exe");
-            return File.Exists(path) ? path : null;
-        }
-    }
+    private string ConsoleExecutable => Path.Combine(Location, ConsoleName);
+    private string WindowlessPath => Path.Combine(Location, WindowlessName);
+    private string? WindowlessExecutable => File.Exists(WindowlessPath) ? WindowlessPath : null;
 
     public string HelperExecutable => WindowlessExecutable ?? ConsoleExecutable;
 
     internal bool ContainsExecutable(string? path) => string.Equals(path, ConsoleExecutable, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(path, Path.Combine(Location, "authbridgew.exe"), StringComparison.OrdinalIgnoreCase);
+        || string.Equals(path, WindowlessPath, StringComparison.OrdinalIgnoreCase);
 
     // The updater stops its parent helper, so it must not rely on pipes owned by that helper.
     public ProcessStartInfo TrayUpdateStartInfo(bool automatic = false) =>
@@ -83,9 +81,9 @@ internal sealed class InstalledPackage(string location)
         var source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
         if (string.Equals(source, Path.TrimEndingDirectorySeparator(Path.GetFullPath(Location)), StringComparison.OrdinalIgnoreCase))
             return false;
-        var executable = Path.Combine(source, "authbridge.exe");
+        var executable = Path.Combine(source, ConsoleName);
         if (!File.Exists(executable))
-            throw new FileNotFoundException("The Windows package is missing authbridge.exe.", executable);
+            throw new FileNotFoundException($"The Windows package is missing {ConsoleName}.", executable);
 
         await stopIfRunning();
         InstallFilesFrom(source);

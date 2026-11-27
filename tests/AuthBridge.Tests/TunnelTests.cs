@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using AuthBridge.Common;
 using AuthBridge.Host;
+using static AuthBridge.Tests.TestSupport;
 
 namespace AuthBridge.Tests;
 
@@ -26,34 +27,27 @@ public sealed class TunnelTests
     [TestMethod]
     public void TrayPreferencePersistsWithoutLosingNewerTunnelOrBrowserSettings()
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-settings-");
+        using var directory = new TempDirectory("authbridge-settings-");
         var path = Path.Combine(directory.FullName, "config.json");
-        try
-        {
-            var settings = new HostSettings(path, message => Assert.Fail(message));
-            Assert.IsFalse(settings.Reload()!.UpdateAutomatically);
-            var target = new Target("dev", ["host"], "/home/dev/.authbridge");
-            HostConfig.Edit(path, config => config with { Targets = [target], BrowserCommand = ["browser", "{url}"] });
-            settings.SetUpdateAutomatically(true);
-            Assert.IsTrue(settings.UpdateAutomatically);
-            Assert.AreEqual("dev", settings.Reload()!.Targets.Single().Name);
+        var settings = NewSettings(path);
+        Assert.IsFalse(settings.Reload()!.UpdateAutomatically);
+        var target = new Target("dev", ["host"], "/home/dev/.authbridge");
+        HostConfig.Edit(path, config => config with { Targets = [target], BrowserCommand = ["browser", "{url}"] });
+        settings.SetUpdateAutomatically(true);
+        Assert.IsTrue(settings.UpdateAutomatically);
+        Assert.AreEqual("dev", settings.Reload()!.Targets.Single().Name);
 
-            var afterRestart = new HostSettings(path, message => Assert.Fail(message));
-            var saved = afterRestart.Reload()!;
-            Assert.IsTrue(saved.UpdateAutomatically);
-            CollectionAssert.AreEqual(new[] { "browser", "{url}" }, saved.BrowserCommand);
-            afterRestart.SetUpdateAutomatically(false);
-            Assert.IsFalse(HostConfig.Load(path).UpdateAutomatically);
+        var afterRestart = NewSettings(path);
+        var saved = afterRestart.Reload()!;
+        Assert.IsTrue(saved.UpdateAutomatically);
+        CollectionAssert.AreEqual(new[] { "browser", "{url}" }, saved.BrowserCommand);
+        afterRestart.SetUpdateAutomatically(false);
+        Assert.IsFalse(HostConfig.Load(path).UpdateAutomatically);
 
-            File.WriteAllText(path, "{unfinished");
-            Assert.ThrowsExactly<InvalidDataException>(() => afterRestart.SetUpdateAutomatically(true));
-            Assert.IsFalse(afterRestart.UpdateAutomatically);
-            Assert.AreEqual("{unfinished", File.ReadAllText(path));
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        File.WriteAllText(path, "{unfinished");
+        Assert.ThrowsExactly<InvalidDataException>(() => afterRestart.SetUpdateAutomatically(true));
+        Assert.IsFalse(afterRestart.UpdateAutomatically);
+        Assert.AreEqual("{unfinished", File.ReadAllText(path));
     }
 
     [TestMethod]
@@ -91,7 +85,7 @@ public sealed class TunnelTests
     public async Task StoppingATunnelClosesItsChildAndCompletesItsLifetime()
     {
         // Like the remote tunnel command, this benign local process exits when standard input closes.
-        using var child = Process.Start(Processes.StartInfo(OperatingSystem.IsWindows() ? "sort.exe" : "cat", []))!;
+        using var child = Process.Start(Processes.StartInfo(StdinReader, []))!;
         using var observer = Process.GetProcessById(child.Id);
         await using var tunnel = new Tunnel(new Target("test", ["host"], "/home/test machine/.authbridge"), 12345, args =>
         {
@@ -182,7 +176,7 @@ public sealed class TunnelTests
     public async Task AnUploadSourceReadErrorFailsPromptlyEvenWhenTheChildWaitsForEof()
     {
         using var input = new FailingReadStream();
-        var copy = Processes.RunAsync(OperatingSystem.IsWindows() ? "sort.exe" : "cat", [], input);
+        var copy = Processes.RunAsync(StdinReader, [], input);
         var error = await Assert.ThrowsExactlyAsync<IOException>(() => copy.WaitAsync(TimeSpan.FromSeconds(5)));
         StringAssert.Contains(error.Message, "source read failed");
     }

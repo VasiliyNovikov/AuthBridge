@@ -3,6 +3,12 @@ namespace AuthBridge.Common;
 /// <summary>Appends to a log file in the state directory, keeping one older file.</summary>
 internal static class Log
 {
+    /// <summary>The Windows helper's log.</summary>
+    public const string HostFile = "host.log";
+
+    /// <summary>The Linux client's log, which its browser command and its workers share.</summary>
+    public const string ClientFile = "client.log";
+
     private const long MaxBytes = 1 << 20;
     private static readonly Lock Gate = new();
     private static bool _echo;

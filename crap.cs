@@ -1,25 +1,18 @@
 #!/usr/bin/env dotnet
-#:property PublishAot=false
-using System.Diagnostics;
+#:include eng/Repository.cs
 using System.Globalization;
 using System.Text.Json;
-using System.Xml.Linq;
 
-Directory.SetCurrentDirectory((string)AppContext.GetData("EntryPointFileDirectoryPath")!);
-var baseline = XElement.Load("code-metrics-baseline.props").Elements("PropertyGroup").Elements()
-    .ToDictionary(property => property.Name.LocalName, StringComparer.Ordinal);
+var baseline = Repository.LoadBaseline();
 var threshold = (int)baseline["crapMethodThreshold"];
 var ceiling = (decimal)baseline["maxTotalCrapLoad"];
 if (threshold <= 0 || ceiling < 0)
     throw new InvalidDataException("The CRAP method threshold must be positive and the load ceiling nonnegative.");
 
-var output = Directory.CreateDirectory(Path.Combine("artifacts", "crap")).FullName;
-var coverage = Path.Combine(output, "coverage.cobertura.xml");
-var report = Path.Combine(output, "report.json");
-File.Delete(coverage);
-File.Delete(report);
+var coverage = Repository.Artifact("crap", "coverage.cobertura.xml");
+var report = Repository.Artifact("crap", "report.json");
 
-var restore = Dotnet("tool", "restore");
+var restore = Repository.Dotnet("tool", "restore");
 if (restore != 0)
     return restore;
 
@@ -27,7 +20,7 @@ if (restore != 0)
 var results = Directory.CreateTempSubdirectory("authbridge-crap-");
 try
 {
-    var test = Dotnet("test", "--project", Path.Combine("tests", "AuthBridge.Tests", "AuthBridge.Tests.csproj"),
+    var test = Repository.Dotnet("test", "--project", Path.Combine("tests", "AuthBridge.Tests", "AuthBridge.Tests.csproj"),
         "-c", "Release", "--results-directory", results.FullName, "--coverlet", "--coverlet-include", "[authbridge]*",
         "--coverlet-output-format", "cobertura");
     if (test != 0)
@@ -41,7 +34,7 @@ finally
     results.Delete(recursive: true);
 }
 
-var analysis = Dotnet("tool", "run", "dotnet-crap", "--", "analyze", Path.Combine("src", "AuthBridge", "AuthBridge.csproj"),
+var analysis = Repository.Dotnet("tool", "run", "dotnet-crap", "--", "analyze", Path.Combine("src", "AuthBridge", "AuthBridge.csproj"),
     "--coverage", coverage, "--threshold", threshold.ToString(CultureInfo.InvariantCulture), "--output", report);
 // Exit 1 means there are hotspots, not that analysis failed. The project's gate is their combined load.
 if (analysis is not (0 or 1))
@@ -61,10 +54,3 @@ if (load > ceiling)
     return 1;
 }
 return 0;
-
-static int Dotnet(params string[] arguments)
-{
-    using var process = Process.Start(new ProcessStartInfo("dotnet", arguments))!;
-    process.WaitForExit();
-    return process.ExitCode;
-}

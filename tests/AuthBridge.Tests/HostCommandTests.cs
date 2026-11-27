@@ -101,7 +101,7 @@ public sealed class HostCommandTests
     [TestMethod]
     public void ForcedStopRejectsAnUnrelatedProcessAndGracefulStopWaitsForExit()
     {
-        using var child = Process.Start(Processes.StartInfo(OperatingSystem.IsWindows() ? "sort.exe" : "cat", []))!;
+        using var child = Process.Start(Processes.StartInfo(TestSupport.StdinReader, []))!;
         try
         {
             Assert.IsFalse(HelperControl.StopProcess(child.Id, _ => false, TimeSpan.Zero, requireApproval: true));

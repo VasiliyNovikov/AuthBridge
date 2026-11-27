@@ -32,18 +32,10 @@ public sealed class ClientCommandTests
     [DoNotParallelize]
     public async Task VersionCommandPrintsTheFullBuildVersionWithoutContactingAHelper()
     {
-        var previous = Console.Out;
         using var output = new StringWriter();
-        try
-        {
-            Console.SetOut(output);
-            Assert.AreEqual(0, await Program.Main(["--version"]));
-            Assert.AreEqual(AppVersion.Informational + Environment.NewLine, output.ToString());
-        }
-        finally
-        {
-            Console.SetOut(previous);
-        }
+        using var redirect = new ConsoleRedirect(output: output);
+        Assert.AreEqual(0, await Program.Main(["--version"]));
+        Assert.AreEqual(AppVersion.Informational + Environment.NewLine, output.ToString());
     }
 
     [TestMethod]
@@ -56,19 +48,11 @@ public sealed class ClientCommandTests
     [DataRow("--setup-shell", "extra")]
     public async Task BrowserOptionsFailBeforeTryingToOpenAnything(params string[] args)
     {
-        var previous = Console.Error;
         using var errors = new StringWriter();
-        try
-        {
-            Console.SetError(errors);
-            Assert.AreEqual(1, await Cli.InvokeAsync(Commands(), args));
-            StringAssert.Contains(errors.ToString(), "Usage:");
-            Assert.DoesNotContain("For AI agents:", errors.ToString());
-        }
-        finally
-        {
-            Console.SetError(previous);
-        }
+        using var redirect = new ConsoleRedirect(error: errors);
+        Assert.AreEqual(1, await Cli.InvokeAsync(Commands(), args));
+        StringAssert.Contains(errors.ToString(), "Usage:");
+        Assert.DoesNotContain("For AI agents:", errors.ToString());
     }
 
     [TestMethod]

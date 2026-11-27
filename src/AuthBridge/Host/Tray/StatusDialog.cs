@@ -26,19 +26,10 @@ internal sealed class StatusDialog : IDisposable
     public StatusDialog(Icon icon, int port, Func<PingResult> getStatus)
     {
         _port = port;
-        Window = new Form
-        {
-            Text = "AuthBridge Status",
-            Icon = icon,
-            ShowInTaskbar = false,
-            MinimizeBox = false,
-            StartPosition = FormStartPosition.CenterScreen,
-            AutoScaleMode = AutoScaleMode.Dpi,
-            AutoScaleDimensions = new SizeF(96, 96),
-            ClientSize = new Size(740, 320),
-            MinimumSize = new Size(480, 220),
-            Padding = new Padding(12),
-        };
+        Window = TrayDialog.Create("AuthBridge Status", icon);
+        Window.ClientSize = new Size(740, 320);
+        Window.MinimumSize = new Size(480, 220);
+        Window.Padding = new Padding(12);
         _connections.Columns.Add("Machine", 130);
         _connections.Columns.Add("State", 100);
         _connections.Columns.Add("Since (local)", 150);
@@ -63,7 +54,7 @@ internal sealed class StatusDialog : IDisposable
     public void Update(PingResult status)
     {
         var tunnels = status.Tunnels;
-        var connections = tunnels.Length == 0 ? "No machines configured" : $"{tunnels.Count(t => t.State == "connected")}/{tunnels.Length} connected";
+        var connections = tunnels.Length == 0 ? "No machines configured" : TrayNotification.Connections(tunnels);
         _summary.Text = $"AuthBridge {AppVersion.Release} on {status.Machine}  |  PID {status.Pid}  |  127.0.0.1:{_port}\r\n" +
             $"{connections}  |  Active relay sessions: {status.Sessions}";
 

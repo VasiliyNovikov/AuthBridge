@@ -1,6 +1,6 @@
 #!/usr/bin/env dotnet
+#:include eng/Repository.cs
 using System.Text.Json;
-using System.Xml.Linq;
 
 if (args is not [var reportPath])
 {
@@ -8,21 +8,36 @@ if (args is not [var reportPath])
     return 1;
 }
 
-var root = (string)AppContext.GetData("EntryPointFileDirectoryPath")!;
-var baseline = XElement.Load(Path.Combine(root, "code-metrics-baseline.props")).Elements("PropertyGroup").Elements()
-    .ToDictionary(property => property.Name.LocalName, StringComparer.Ordinal);
+var baseline = Repository.LoadBaseline();
 var baselineDetected = (int)baseline["detectedMutants"];
 var baselineValid = (int)baseline["validMutants"];
 if (baselineDetected <= 0 || baselineDetected > baselineValid)
     throw new InvalidDataException("The mutation baseline must have 0 < detected <= valid.");
 
 using var report = JsonDocument.Parse(File.ReadAllBytes(reportPath));
-var mutants = report.RootElement.GetProperty("files").EnumerateObject()
-    .SelectMany(file => file.Value.GetProperty("mutants").EnumerateArray());
-int detected = 0, undetected = 0;
-foreach (var mutant in mutants)
+// The leading slash makes a target such as Common/Http.cs match whole path segments only.
+var files = report.RootElement.GetProperty("files").EnumerateObject().Select(file => (
+    Path: "/" + file.Name.Replace('\\', '/'),
+    Statuses: file.Value.GetProperty("mutants").EnumerateArray().Select(mutant => mutant.GetProperty("status").GetString()).ToArray())).ToArray();
+
+// Each file that Stryker mutates needs at least one killed mutant, whatever the overall score.
+using var config = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Repository.Root, "tests", "AuthBridge.Tests", "stryker-config.json")));
+var passed = true;
+foreach (var target in config.RootElement.GetProperty("stryker-config").GetProperty("mutate").EnumerateArray().Select(target => target.GetString()))
 {
-    var status = mutant.GetProperty("status").GetString();
+    var killed = files.Where(file => file.Path.EndsWith($"/{target}", StringComparison.Ordinal)).Sum(file => file.Statuses.Count(status => status == "Killed"));
+    if (killed > 0)
+        Console.WriteLine($"{target}: {killed} killed");
+    else
+    {
+        Console.Error.WriteLine($"No killed mutants in {target}.");
+        passed = false;
+    }
+}
+
+int detected = 0, undetected = 0;
+foreach (var status in files.SelectMany(file => file.Statuses))
+{
     switch (status)
     {
         case "Killed" or "Timeout": detected++; break;
@@ -40,8 +55,8 @@ Console.WriteLine($"Overall mutation score: {Score(detected, valid)}; baseline {
 if ((long)detected * baselineValid < (long)baselineDetected * valid)
 {
     Console.Error.WriteLine("Overall mutation score fell below the baseline.");
-    return 1;
+    passed = false;
 }
-return 0;
+return passed ? 0 : 1;
 
 static string Score(int detected, int valid) => FormattableString.Invariant($"{100m * detected / valid:F2}% ({detected}/{valid})");

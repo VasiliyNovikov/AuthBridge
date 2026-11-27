@@ -8,6 +8,9 @@ namespace AuthBridge.Host;
 [SupportedOSPlatform("windows")]
 internal static partial class HostCommands
 {
+    /// <summary>How long the helper may take to exit once asked, and again once terminated.</summary>
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(15);
+
     public static HostCommandLine CreateCommand() => new(StatusAsync, InstallRemoteAsync, RemoteAsync)
     {
         Cli.Command("serve", "Run the helper in the foreground.", HelperHost.RunAsync),
@@ -20,7 +23,7 @@ internal static partial class HostCommands
     private static HelperControl CreateControl() => new(PingAsync, Console.Out, Console.Error);
     private static Task<int> StatusAsync() => CreateControl().StatusAsync(Protocol.ControlPort);
     private static Task<int> StartAsync(string folder) => CreateControl().StartAsync(() => LaunchHelper(folder),
-        Path.Combine(Paths.StateDir, "host.log"), TimeSpan.FromMilliseconds(200));
+        Path.Combine(Paths.StateDir, Log.HostFile), TimeSpan.FromMilliseconds(200));
 
     private static void LaunchHelper(string folder)
     {
@@ -45,7 +48,7 @@ internal static partial class HostCommands
     {
         if (await PingAsync() is not { } running)
             return false;
-        HelperControl.StopProcess(running.Pid, TrayControlWindow.RequestExit, TimeSpan.FromSeconds(15));
+        HelperControl.StopProcess(running.Pid, TrayControlWindow.RequestExit, StopTimeout);
         Console.WriteLine($"authbridge helper stopped (pid {running.Pid})");
         return true;
     }
@@ -78,7 +81,7 @@ internal static partial class HostCommands
             return 1;
         var info = await RemoteClient.WaitForChecksAsync(PingAsync, TimeSpan.FromSeconds(2));
         var status = await StatusAsync();
-        if (info?.Tunnels.Any(tunnel => tunnel.State != "connected") == true)
+        if (info?.Tunnels.Any(tunnel => tunnel.State != TunnelStatus.Connected) == true)
             Console.WriteLine("Machines that are not connected get the new client when their tunnels connect.");
         return status;
     }
@@ -92,7 +95,7 @@ internal static partial class HostCommands
         }
         // A sign-in may have started, or the user may have opted out, while the package was downloading.
         return await PingAsync() is { Sessions: 0 } running &&
-            HelperControl.StopProcess(running.Pid, TrayControlWindow.RequestIdleExit, TimeSpan.FromSeconds(15), requireApproval: true);
+            HelperControl.StopProcess(running.Pid, TrayControlWindow.RequestIdleExit, StopTimeout, requireApproval: true);
     }
 
     /// <summary>Installs this package for the current user unless it runs from the installation, starts the helper now
@@ -110,13 +113,13 @@ internal static partial class HostCommands
     {
         var machine = await RemoteClient.ProbeAsync(ssh);
         var version = await machine.EnsureVersionAsync(AppVersion.Release, arch => RemoteClient.UploadAsync(ssh, arch), installIfMissing: true);
-        Console.WriteLine($"authbridge {version} at {machine.Home}/.local/bin/authbridge");
-        var setup = await Ssh.RunAsync(ssh, "~/.local/bin/authbridge --setup-shell");
+        Console.WriteLine($"authbridge {version} at {machine.Home}/{RemoteClient.HomePath}");
+        var setup = await Ssh.RunAsync(ssh, $"{RemoteClient.Executable} --setup-shell");
         Console.Write(setup.OutputOrThrow("remote shell setup failed"));
 
         HostConfig.Edit(HostConfig.FilePath, config => config with
         {
-            Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/.authbridge")],
+            Targets = [.. config.Targets.Where(target => target.Name != name), new Target(name, ssh, $"{machine.Home}/{Paths.StateDirName}")],
         });
         Console.WriteLine($"tunnel '{name}' saved to {HostConfig.FilePath}");
         if (await StartAsync(AppContext.BaseDirectory) != 0)
@@ -134,7 +137,7 @@ internal static partial class HostCommands
         var targets = HostConfig.Load().Targets;
         if (targets.FirstOrDefault(target => target.Name == name) is not { } target)
             return Program.Fail($"no machine named '{name}'; configured: {string.Join(", ", targets.Select(target => target.Name))}");
-        var command = string.Join(' ', ["~/.local/bin/authbridge", .. arguments.Select(PosixShell.Quote)]);
+        var command = string.Join(' ', [RemoteClient.Executable, .. arguments.Select(PosixShell.Quote)]);
         var (exitCode, output, error) = await Ssh.RunAsync(target.Ssh, command);
         Console.Write(output);
         Console.Error.Write(error);

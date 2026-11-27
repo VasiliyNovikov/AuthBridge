@@ -1,9 +1,9 @@
 using System.CommandLine;
 using System.IO.Compression;
-using System.Net;
 using System.Text;
 using AuthBridge.Common;
 using AuthBridge.Host;
+using static AuthBridge.Tests.TestSupport;
 
 namespace AuthBridge.Tests;
 
@@ -69,40 +69,29 @@ public sealed class UpdaterTests
     }
 
     [TestMethod]
+    [OSCondition(OperatingSystems.Linux, IgnoreMessage = "Checks the actual remote install command in a POSIX shell.")]
     public async Task RemoteInstallRejectsTruncationOrWrongVersionAndCannotOverwriteANewerClient()
     {
-        if (!OperatingSystem.IsLinux())
+        using var home = new TempDirectory("authbridge upload ");
+        async Task<ProcessResult> Upload(string advertised, string staged, bool truncate = false)
         {
-            Assert.Inconclusive("Checks the actual remote install command in a POSIX shell.");
-            return;
+            var bytes = Encoding.UTF8.GetBytes($"#!/bin/sh\nprintf '%s\\n' '{staged}+build'\n");
+            using var input = new MemoryStream(truncate ? bytes[..^1] : bytes);
+            var command = "export HOME=\"$1\"\n" + Ssh.Arguments(["unused"], RemoteClient.UploadCommand(bytes.Length, advertised))[^1];
+            return await Processes.RunAsync("sh", ["-c", command, "sh", home.FullName], input);
         }
-        var home = Directory.CreateTempSubdirectory("authbridge upload ");
-        try
-        {
-            async Task<ProcessResult> Upload(string advertised, string staged, bool truncate = false)
-            {
-                var bytes = Encoding.UTF8.GetBytes($"#!/bin/sh\nprintf '%s\\n' '{staged}+build'\n");
-                using var input = new MemoryStream(truncate ? bytes[..^1] : bytes);
-                var command = "export HOME=\"$1\"\n" + Ssh.Arguments(["unused"], RemoteClient.UploadCommand(bytes.Length, advertised))[^1];
-                return await Processes.RunAsync("sh", ["-c", command, "sh", home.FullName], input);
-            }
-            Assert.AreEqual("1.0.0", (await Upload("1.0.0", "1.0.0")).OutputOrThrow("install").Trim());
-            var dest = Path.Combine(home.FullName, ".local", "bin", "authbridge");
-            var original = File.ReadAllBytes(dest);
-            Assert.AreNotEqual(0, (await Upload("2.0.0", "2.0.0", truncate: true)).ExitCode);
-            Assert.AreNotEqual(0, (await Upload("2.0.0", "1.9.9")).ExitCode);
-            CollectionAssert.AreEqual(original, File.ReadAllBytes(dest));
+        Assert.AreEqual("1.0.0", (await Upload("1.0.0", "1.0.0")).OutputOrThrow("install").Trim());
+        var dest = Path.Combine(home.FullName, ".local", "bin", "authbridge");
+        var original = File.ReadAllBytes(dest);
+        Assert.AreNotEqual(0, (await Upload("2.0.0", "2.0.0", truncate: true)).ExitCode);
+        Assert.AreNotEqual(0, (await Upload("2.0.0", "1.9.9")).ExitCode);
+        CollectionAssert.AreEqual(original, File.ReadAllBytes(dest));
 
-            var concurrent = await Task.WhenAll(Upload("1.2.0", "1.2.0"), Upload("1.10.0", "1.10.0"));
-            foreach (var result in concurrent)
-                result.OutputOrThrow("concurrent install");
-            Assert.AreEqual("1.10.0", (await Upload("1.2.0", "1.2.0")).OutputOrThrow("no downgrade").Trim());
-            Assert.AreEqual("1.10.0+build", (await Processes.RunAsync(dest, ["--version"])).OutputOrThrow("installed version").Trim());
-        }
-        finally
-        {
-            home.Delete(recursive: true);
-        }
+        var concurrent = await Task.WhenAll(Upload("1.2.0", "1.2.0"), Upload("1.10.0", "1.10.0"));
+        foreach (var result in concurrent)
+            result.OutputOrThrow("concurrent install");
+        Assert.AreEqual("1.10.0", (await Upload("1.2.0", "1.2.0")).OutputOrThrow("no downgrade").Trim());
+        Assert.AreEqual("1.10.0+build", (await Processes.RunAsync(dest, ["--version"])).OutputOrThrow("installed version").Trim());
     }
 
     [TestMethod]
@@ -125,10 +114,9 @@ public sealed class UpdaterTests
     [DataRow(503)]
     public async Task ChecksOnlyTheLatestReleaseHeadersAndRequiresARedirect(int status)
     {
-        await using var server = HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(
-            request is { Method: "HEAD", Target: "/releases/latest" }
-                ? new HttpResponse(status, [new("Location", "/releases/tag/v1.2.3")], [])
-                : new HttpResponse(405, [], [])));
+        await using var server = Serve(request => request is { Method: "HEAD", Target: "/releases/latest" }
+            ? new HttpResponse(status, [new("Location", "/releases/tag/v1.2.3")], [])
+            : new HttpResponse(405, [], []));
         using var http = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
         {
             BaseAddress = new Uri($"http://127.0.0.1:{server.Port}/releases/"),
@@ -196,73 +184,52 @@ public sealed class UpdaterTests
     [TestMethod]
     public async Task InstallingAReplacementWaitsForShutdownButAnInPlaceInstallLeavesTheHelperAlone()
     {
-        var root = Directory.CreateTempSubdirectory("authbridge-replace-");
-        try
-        {
-            var source = root.CreateSubdirectory("source").FullName;
-            var target = root.CreateSubdirectory("installed").FullName;
-            var executable = Path.Combine(target, "authbridge.exe");
-            File.WriteAllText(executable, "running");
-            File.WriteAllText(Path.Combine(source, "authbridge.exe"), "replacement");
-            var package = new InstalledPackage(target);
-            var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var install = package.InstallFromAsync(source, () => stopped.Task);
+        using var root = new TempDirectory("authbridge-replace-");
+        var source = root.CreateSubdirectory("source").FullName;
+        var target = root.CreateSubdirectory("installed").FullName;
+        var executable = Path.Combine(target, "authbridge.exe");
+        File.WriteAllText(executable, "running");
+        File.WriteAllText(Path.Combine(source, "authbridge.exe"), "replacement");
+        var package = new InstalledPackage(target);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var install = package.InstallFromAsync(source, () => stopped.Task);
 
-            Assert.IsFalse(install.IsCompleted);
-            Assert.AreEqual("running", File.ReadAllText(executable));
-            stopped.SetResult();
-            Assert.IsTrue(await install);
-            Assert.AreEqual("replacement", File.ReadAllText(executable));
-            Assert.IsFalse(await package.InstallFromAsync(Path.Combine(target, "."), () => throw new AssertFailedException("Unexpected helper shutdown.")));
-        }
-        finally
-        {
-            root.Delete(recursive: true);
-        }
+        Assert.IsFalse(install.IsCompleted);
+        Assert.AreEqual("running", File.ReadAllText(executable));
+        stopped.SetResult();
+        Assert.IsTrue(await install);
+        Assert.AreEqual("replacement", File.ReadAllText(executable));
+        Assert.IsFalse(await package.InstallFromAsync(Path.Combine(target, "."), () => throw new AssertFailedException("Unexpected helper shutdown.")));
     }
 
     [TestMethod]
     public async Task MissingPackageExecutableDoesNotStopTheRunningHelper()
     {
-        var source = Directory.CreateTempSubdirectory("authbridge-incomplete-");
-        try
-        {
-            var package = new InstalledPackage(Path.Combine(source.FullName, "target"));
-            await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
-                package.InstallFromAsync(source.FullName, () => throw new AssertFailedException("Unexpected helper shutdown.")));
-        }
-        finally
-        {
-            source.Delete(recursive: true);
-        }
+        using var source = new TempDirectory("authbridge-incomplete-");
+        var package = new InstalledPackage(Path.Combine(source.FullName, "target"));
+        await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
+            package.InstallFromAsync(source.FullName, () => throw new AssertFailedException("Unexpected helper shutdown.")));
     }
 
     [TestMethod]
     public async Task ReplacingAPackageKeepsAnOpenExecutableReadable()
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-install-");
-        try
-        {
-            var path = Path.Combine(directory.FullName, "authbridge.exe");
-            File.WriteAllBytes(path, [1]);
-            using var running = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-            var package = new InstalledPackage(directory.FullName);
-            await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
-                package.InstallAsync(ReleaseZip("authbridge.exe"), () => throw new AssertFailedException("Incomplete archive stopped the helper.")));
-            CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
+        using var directory = new TempDirectory("authbridge-install-");
+        var path = Path.Combine(directory.FullName, "authbridge.exe");
+        File.WriteAllBytes(path, [1]);
+        using var running = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        var package = new InstalledPackage(directory.FullName);
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            package.InstallAsync(ReleaseZip("authbridge.exe"), () => throw new AssertFailedException("Incomplete archive stopped the helper.")));
+        CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
 
-            var release = ReleaseZip("authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE");
-            Assert.IsFalse(await package.InstallAsync(release, () => Task.FromResult(false)));
-            CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
-            Assert.IsTrue(await package.InstallAsync(release, () => Task.FromResult(true)));
+        var release = ReleaseZip("authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE");
+        Assert.IsFalse(await package.InstallAsync(release, () => Task.FromResult(false)));
+        CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
+        Assert.IsTrue(await package.InstallAsync(release, () => Task.FromResult(true)));
 
-            Assert.AreEqual(1, running.ReadByte());
-            CollectionAssert.AreEqual(new byte[] { 2 }, File.ReadAllBytes(path));
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
-        }
+        Assert.AreEqual(1, running.ReadByte());
+        CollectionAssert.AreEqual(new byte[] { 2 }, File.ReadAllBytes(path));
     }
 
     private static byte[] ReleaseZip(params string[] files)
@@ -282,34 +249,27 @@ public sealed class UpdaterTests
     [TestMethod]
     public void LogonAndTrayUpdateUseTheGuiExecutableWhenAvailable()
     {
-        var folder = Directory.CreateTempSubdirectory("authbridge launch ");
-        try
-        {
-            var package = new InstalledPackage(folder.FullName);
-            var console = Path.Combine(folder.FullName, "authbridge.exe");
-            Assert.AreEqual(console, package.HelperExecutable);
-            Assert.AreEqual($"\"{console}\" start", package.LogonCommand);
-            AssertWindowlessUpdate(console);
+        using var folder = new TempDirectory("authbridge launch ");
+        var package = new InstalledPackage(folder.FullName);
+        var console = Path.Combine(folder.FullName, "authbridge.exe");
+        Assert.AreEqual(console, package.HelperExecutable);
+        Assert.AreEqual($"\"{console}\" start", package.LogonCommand);
+        AssertWindowlessUpdate(console);
 
-            var gui = Path.Combine(folder.FullName, "authbridgew.exe");
-            File.WriteAllBytes(gui, []);
-            Assert.AreEqual(gui, package.HelperExecutable);
-            Assert.AreEqual($"\"{gui}\" serve", package.LogonCommand);
-            AssertWindowlessUpdate(gui);
+        var gui = Path.Combine(folder.FullName, "authbridgew.exe");
+        File.WriteAllBytes(gui, []);
+        Assert.AreEqual(gui, package.HelperExecutable);
+        Assert.AreEqual($"\"{gui}\" serve", package.LogonCommand);
+        AssertWindowlessUpdate(gui);
 
-            void AssertWindowlessUpdate(string executable)
-            {
-                var start = package.TrayUpdateStartInfo();
-                Assert.AreEqual(executable, start.FileName);
-                CollectionAssert.AreEqual(new[] { "update", "--from-tray" }, start.ArgumentList.ToArray());
-                Assert.IsFalse(start.UseShellExecute);
-                Assert.IsTrue(start.CreateNoWindow);
-                Assert.IsFalse(start.RedirectStandardOutput || start.RedirectStandardError);
-            }
-        }
-        finally
+        void AssertWindowlessUpdate(string executable)
         {
-            folder.Delete(recursive: true);
+            var start = package.TrayUpdateStartInfo();
+            Assert.AreEqual(executable, start.FileName);
+            CollectionAssert.AreEqual(new[] { "update", "--from-tray" }, start.ArgumentList.ToArray());
+            Assert.IsFalse(start.UseShellExecute);
+            Assert.IsTrue(start.CreateNoWindow);
+            Assert.IsFalse(start.RedirectStandardOutput || start.RedirectStandardError);
         }
     }
 
@@ -317,52 +277,40 @@ public sealed class UpdaterTests
     [DoNotParallelize]
     public async Task TrayUpdateRecordsProgressAndFailureWithoutWritingToTheConsole()
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-tray-update-");
+        using var directory = new TempDirectory("authbridge-tray-update-");
         var path = Path.Combine(directory.FullName, "update.log");
-        var output = Console.Out;
-        var error = Console.Error;
         using var terminal = new StringWriter();
-        try
+        using var redirect = new ConsoleRedirect(terminal, terminal);
+        var fail = false;
+        var root = new RootCommand { TrayUpdate.CreateCommand(directory.FullName, automatic =>
         {
-            Console.SetOut(terminal);
-            Console.SetError(terminal);
-            var fail = false;
-            var root = new RootCommand { TrayUpdate.CreateCommand(directory.FullName, automatic =>
-            {
-                Console.WriteLine(automatic ? "automatic download" : "downloading");
-                return fail ? Task.FromException<int>(new IOException("installation failed")) : Task.FromResult(0);
-            }) };
-            Assert.AreEqual(0, await Cli.InvokeAsync(root, ["update"]));
-            Assert.AreEqual("downloading" + Environment.NewLine, terminal.ToString());
-            Assert.IsFalse(File.Exists(path));
-            terminal.GetStringBuilder().Clear();
+            Console.WriteLine(automatic ? "automatic download" : "downloading");
+            return fail ? Task.FromException<int>(new IOException("installation failed")) : Task.FromResult(0);
+        }) };
+        Assert.AreEqual(0, await Cli.InvokeAsync(root, ["update"]));
+        Assert.AreEqual("downloading" + Environment.NewLine, terminal.ToString());
+        Assert.IsFalse(File.Exists(path));
+        terminal.GetStringBuilder().Clear();
 
-            fail = true;
-            var package = new InstalledPackage(directory.FullName);
-            var arguments = package.TrayUpdateStartInfo().ArgumentList.ToArray();
-            Assert.AreEqual(1, await Cli.InvokeAsync(root, arguments));
-            Assert.AreEqual("", terminal.ToString());
-            CollectionAssert.AreEqual(new[] { "downloading", "authbridge: installation failed" }, File.ReadAllLines(path));
+        fail = true;
+        var package = new InstalledPackage(directory.FullName);
+        var arguments = package.TrayUpdateStartInfo().ArgumentList.ToArray();
+        Assert.AreEqual(1, await Cli.InvokeAsync(root, arguments));
+        Assert.AreEqual("", terminal.ToString());
+        CollectionAssert.AreEqual(new[] { "downloading", "authbridge: installation failed" }, File.ReadAllLines(path));
 
-            Assert.AreEqual(1, await Cli.InvokeAsync(root, package.TrayUpdateStartInfo(automatic: true).ArgumentList.ToArray()));
-            CollectionAssert.AreEqual(new[] { "automatic download", "authbridge: installation failed" }, File.ReadAllLines(path));
-            var unavailable = new RootCommand { TrayUpdate.CreateCommand(path, _ => throw new AssertFailedException("No log, no update.")) };
-            Assert.AreEqual(TrayUpdate.LogUnavailable, await Cli.InvokeAsync(unavailable, arguments));
-            Assert.AreEqual("", terminal.ToString());
-        }
-        finally
-        {
-            Console.SetOut(output);
-            Console.SetError(error);
-            directory.Delete(recursive: true);
-        }
+        Assert.AreEqual(1, await Cli.InvokeAsync(root, package.TrayUpdateStartInfo(automatic: true).ArgumentList.ToArray()));
+        CollectionAssert.AreEqual(new[] { "automatic download", "authbridge: installation failed" }, File.ReadAllLines(path));
+        var unavailable = new RootCommand { TrayUpdate.CreateCommand(path, _ => throw new AssertFailedException("No log, no update.")) };
+        Assert.AreEqual(TrayUpdate.LogUnavailable, await Cli.InvokeAsync(unavailable, arguments));
+        Assert.AreEqual("", terminal.ToString());
     }
 
     [TestMethod]
     [DoNotParallelize]
     public async Task AnAutomaticUpdateCannotRaceAnUpdateStartedInATerminal()
     {
-        var directory = Directory.CreateTempSubdirectory("authbridge-exclusive-update-");
+        using var directory = new TempDirectory("authbridge-exclusive-update-");
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var finish = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var runs = 0;
@@ -387,7 +335,6 @@ public sealed class UpdaterTests
         {
             finish.TrySetResult(0);
             await manual;
-            directory.Delete(recursive: true);
         }
     }
 

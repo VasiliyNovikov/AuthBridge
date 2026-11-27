@@ -43,14 +43,7 @@ internal static class TrayUpdate
             log.AutoFlush = true;
             Console.SetOut(log);
             Console.SetError(log);
-            try
-            {
-                return await update();
-            }
-            catch (Exception e) when (Program.IsCommandError(e))
-            {
-                return Program.Fail($"authbridge: {e.Message}");
-            }
+            return await Program.RunAsync(update);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
