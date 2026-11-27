@@ -39,6 +39,8 @@ internal sealed partial class StatusIcon : IDisposable
         _notification.Text = tip;
     }
 
+    public void ShowUpdateMessage(string message) => _notification.ShowBalloonTip(5000, "AuthBridge updates", message, ToolTipIcon.Info);
+
     private Icon WithDot(uint color)
     {
         using var bitmap = _base.ToBitmap();

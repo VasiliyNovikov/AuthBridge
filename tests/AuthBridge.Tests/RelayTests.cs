@@ -358,7 +358,7 @@ public sealed class RelayTests
             await client.CloseAsync(first.Session);
             tray.Refresh();
             tray.Refresh();
-            tray.StartManual();
+            await tray.CheckOrUpdateAsync("2.0");
             Assert.AreEqual(1, launches);
 
             var duringDownload = await client.OpenAsync(request);

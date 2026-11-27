@@ -159,8 +159,10 @@ The menu also lets you open the log, exit, or choose **About**. On Windows 11 an
 Windows app theme selected when the helper starts. Restart the helper to pick up a light/dark change. Contrast themes take
 precedence; Windows 10 uses the standard system colors.
 The helper checks for updates at startup and every five minutes using only GitHub's release redirect headers.
-If checks fail, it keeps the last known result and waits longer between attempts, up to an hour. When a newer release
-is available, choose **Update** to install it and restart the helper without opening a terminal.
+If checks fail, it keeps the last known result and waits longer between attempts, up to an hour. The tray menu
+shows **Check...** when no newer release is known. Choose it to check immediately and get a tray notification;
+checking does not install anything. When a newer version is known, the same item reads **Update ... VERSION**.
+Choose it to install the update and restart the helper without opening a terminal.
 
 Check **Auto-update** in the tray menu to install new releases silently when no sign-in relay is active.
 It is off by default; the choice is saved as `updateAutomatically` in the Windows `config.json`. If a relay starts

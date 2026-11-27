@@ -7,6 +7,7 @@ namespace AuthBridge.Host;
 internal sealed class TrayUpdater(HostSettings settings, UpdateCheck releases, Helper helper, Func<bool, Process> launch) : IDisposable
 {
     private Process? _process;
+    private bool _checking;
     private bool _automatic;
     private UpdateCheck.ReleaseOffer? _attempted;
 
@@ -14,7 +15,8 @@ internal sealed class TrayUpdater(HostSettings settings, UpdateCheck releases, H
         automatic => Process.Start(new InstalledPackage(AppContext.BaseDirectory).TrayUpdateStartInfo(automatic))
             ?? throw new IOException("could not start authbridge update")) { }
 
-    public bool CanUpdate => _process is null && releases.Available;
+    public string? AvailableVersion => releases.Offer?.Version;
+    public bool IsBusy => _checking || _process is not null;
     public bool UpdateAutomatically => settings.UpdateAutomatically;
 
     public void SetUpdateAutomatically(bool enabled)
@@ -23,16 +25,41 @@ internal sealed class TrayUpdater(HostSettings settings, UpdateCheck releases, H
         _attempted = null;
     }
 
-    public void StartManual()
+    /// <summary>A check returns a notification. An install click applies only to the version the menu displayed.</summary>
+    public async Task<string?> CheckOrUpdateAsync(string? displayedVersion)
     {
-        if (_process is null && releases.Offer is { } offer)
+        if (IsBusy)
+            return null;
+        if (displayedVersion is null)
+            return await CheckNowAsync();
+        if (releases.Offer is { } offer && offer.Version == displayedVersion)
             Start(offer, automatic: false);
+        return null;
+    }
+
+    private async Task<string?> CheckNowAsync()
+    {
+        _checking = true;
+        try
+        {
+            if (!await releases.RefreshAsync(DateTime.UtcNow, force: true))
+                return "Could not check for updates. See host.log for details.";
+            return AvailableVersion is { } version ? $"AuthBridge {version} is available." : "AuthBridge is up to date.";
+        }
+        catch (OperationCanceledException)
+        {
+            return null; // The helper is shutting down; there is no result to show.
+        }
+        finally
+        {
+            _checking = false;
+        }
     }
 
     public void Refresh()
     {
         Reap();
-        if (UpdateAutomatically && _process is null && releases.Offer is { } offer && offer != _attempted && !helper.HasRelaySessions)
+        if (UpdateAutomatically && !IsBusy && releases.Offer is { } offer && offer != _attempted && !helper.HasRelaySessions)
             Start(offer, automatic: true);
     }
 

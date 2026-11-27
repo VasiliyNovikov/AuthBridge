@@ -42,8 +42,9 @@ internal sealed class TrayIcon(Thread thread, TrayControlWindow window) : IDispo
         using var about = AboutDialog.Create(icon);
         using var status = new StatusDialog(icon, helper.Port, helper.GetStatus);
         using var window = new TrayControlWindow(updates);
-        using var menu = TrayMenu.Create(updates, status.Window, about, window);
+        using var menu = new ContextMenuStrip();
         using var notification = new StatusIcon(icon, menu, window);
+        TrayMenu.Populate(menu, updates, status.Window, about, window, notification.ShowUpdateMessage);
         using var timer = new System.Windows.Forms.Timer { Interval = 2000 };
         void Refresh()
         {

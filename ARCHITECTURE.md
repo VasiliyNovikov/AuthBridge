@@ -132,9 +132,11 @@ sign-in secrets. URL logging strips the query and fragment; only selected, bound
   cancelled and awaited when that connection ends. [RemoteClient](src/AuthBridge/Host/RemoteClient.cs) verifies
   the staged upload's length and executable version, then compares installed versions and renames under a remote
   lock so competing helpers cannot downgrade the client.
-- **Helper replacement:** The updater stages the GitHub release before stopping the helper. Automatic installation
-  is opt-in. After staging, the running helper must acknowledge the automatic updater's idle-close request while
-  still opted in and free of relays. Accepting that request also blocks new relay registrations; a prior idle
+- **Helper replacement:** A manual tray check bypasses the polling interval or retry delay and shares any in-flight
+  release lookup with the helper. Checking reports the result; a separate manual install action revalidates the
+  displayed offer before launching the updater. The updater stages the GitHub release before stopping the helper.
+  Automatic installation is opt-in. After staging, the running helper must acknowledge the automatic updater's
+  idle-close request while still opted in and free of relays. Accepting that request also blocks new relay registrations; a prior idle
   ping is not sufficient. [InstalledPackage](src/AuthBridge/Host/InstalledPackage.cs) renames old files aside
   before moving replacements into place because Windows can keep a running executable mapped.
 

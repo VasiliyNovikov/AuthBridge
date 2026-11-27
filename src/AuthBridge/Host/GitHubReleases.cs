@@ -16,7 +16,7 @@ internal static class GitHubReleases
     internal static async Task<string> ReadLatestAsync(HttpClient http, CancellationToken stopping)
     {
         using var request = new HttpRequestMessage(HttpMethod.Head, "latest");
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, stopping);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, stopping).ConfigureAwait(false);
         // GitHub redirects to the page of the latest release, .../releases/tag/v1.2.3.
         const string prefix = "/tag/v";
         var location = response.Headers.Location?.OriginalString ?? "";
@@ -34,45 +34,51 @@ internal static class GitHubReleases
     }
 }
 
-/// <summary>Checks on the helper loop; the tray reads the last successful result without waiting.</summary>
-internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, string current)
+/// <summary>The helper loop and tray share one in-flight release check and the last known offer.</summary>
+internal sealed class UpdateCheck(Func<CancellationToken, Task<string>> latest, string current, CancellationToken stopping = default)
 {
     private const int CheckMinutes = 5;
+    private readonly Lock _gate = new();
     private int _intervalMinutes = CheckMinutes;
     private DateTime _nextCheck;
-    private Task _pending = Task.CompletedTask;
+    private Task<bool> _pending = Task.FromResult(false);
     private volatile ReleaseOffer? _offer;
 
     public sealed record ReleaseOffer(string Version, DateTime CheckedAt);
     public ReleaseOffer? Offer => _offer;
-    public bool Available => _offer is not null;
 
-    public Task RefreshAsync(DateTime now, CancellationToken stopping = default)
+    public Task<bool> RefreshAsync(DateTime now, bool force = false)
     {
-        if (_pending.IsCompleted && now >= _nextCheck && !stopping.IsCancellationRequested)
-            _pending = CheckAsync(now, stopping);
-        return _pending;
+        lock (_gate)
+        {
+            if (stopping.IsCancellationRequested)
+                return Task.FromCanceled<bool>(stopping);
+            if (_pending.IsCompleted && (force || now >= _nextCheck))
+                _pending = CheckAsync(now);
+            return _pending;
+        }
     }
 
-    private async Task CheckAsync(DateTime now, CancellationToken stopping)
+    private async Task<bool> CheckAsync(DateTime now)
     {
         try
         {
-            var version = await latest(stopping);
+            var version = await latest(stopping).ConfigureAwait(false);
             _offer = AppVersion.IsNewer(version, current) ? new ReleaseOffer(version, now) : null;
             _intervalMinutes = CheckMinutes;
+            return true;
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException)
         {
-            if (!stopping.IsCancellationRequested)
-            {
-                _intervalMinutes = Math.Min(2 * _intervalMinutes, 60);
-                Log.Warn($"cannot check for updates: {e.Message}; retrying in {_intervalMinutes} minutes");
-            }
+            stopping.ThrowIfCancellationRequested();
+            _intervalMinutes = Math.Min(2 * _intervalMinutes, 60);
+            Log.Warn($"cannot check for updates: {e.Message}; retrying in {_intervalMinutes} minutes");
+            return false;
         }
         finally
         {
-            _nextCheck = now.AddMinutes(_intervalMinutes);
+            lock (_gate)
+                _nextCheck = now.AddMinutes(_intervalMinutes);
         }
     }
 }

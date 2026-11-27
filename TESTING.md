@@ -9,8 +9,8 @@ on Linux x64 and Arm64 and on Windows x64:
   application's response. They simulate tunnel drops to verify the callback is not replayed. Linux tests also run
   shell setup and upload commands through `sh`.
 - **Windows tray tests** open Status from the menu and check tunnel details, updates, and the empty state after
-  reopening. They also cover the saved check mark, stale update offers, and real stop and idle-update messages to a
-  test tray thread. They do not install or stop the user's helper.
+  reopening. They also cover on-demand update checks, versioned install actions, stale offers, the saved auto-update
+  check mark, and real stop and idle-update messages to a test tray thread. They do not install or stop the user's helper.
 
 CI runs two additional kinds of tests:
 

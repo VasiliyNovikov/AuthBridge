@@ -29,7 +29,8 @@ internal static partial class HelperHost
 
     private static async Task RunUntilStoppedAsync(Helper helper, HostSettings settings, TunnelSet tunnels)
     {
-        var updates = new UpdateCheck(GitHubReleases.LatestAsync, AppVersion.Release);
+        using var stopping = new CancellationTokenSource();
+        var updates = new UpdateCheck(GitHubReleases.LatestAsync, AppVersion.Release, stopping.Token);
         // A queued tray callback can safely signal even after the host has shut down.
         var stopRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void RequestStop() => stopRequested.TrySetResult();
@@ -42,7 +43,6 @@ internal static partial class HelperHost
         try
         {
             using var tray = TrayIcon.Start(helper, new TrayUpdater(settings, updates, helper), RequestStop);
-            using var stopping = new CancellationTokenSource();
             Log.Info($"helper listening on 127.0.0.1:{helper.Port} (pid {Environment.ProcessId})");
             var maintenance = MaintainAsync(helper, settings, tunnels, updates, stopping.Token);
             await Task.WhenAny(stopRequested.Task, maintenance);
@@ -77,7 +77,7 @@ internal static partial class HelperHost
     {
         while (!stopping.IsCancellationRequested)
         {
-            _ = updates.RefreshAsync(DateTime.UtcNow, stopping);
+            _ = updates.RefreshAsync(DateTime.UtcNow);
             if (settings.Reload() is { } config)
                 await tunnels.UpdateAsync(config.Targets);
             await helper.ExpireAsync();

@@ -149,16 +149,17 @@ public sealed class UpdaterTests
 
         await updates.RefreshAsync(now);
         await updates.RefreshAsync(now.AddMinutes(5).AddTicks(-1));
-        Assert.IsTrue(updates.Available);
+        Assert.AreEqual("0.1.10", updates.Offer?.Version);
         Assert.AreEqual(1, checks);
 
         var second = updates.RefreshAsync(now.AddMinutes(5));
+        Assert.AreSame(second, updates.RefreshAsync(now.AddMinutes(5), force: true));
         Assert.AreSame(second, updates.RefreshAsync(now.AddMinutes(10)));
         Assert.AreEqual(2, checks);
-        Assert.IsTrue(updates.Available);
+        Assert.AreEqual("0.1.10", updates.Offer?.Version);
         pending.SetResult("0.1.9");
         await second;
-        Assert.IsFalse(updates.Available);
+        Assert.IsNull(updates.Offer);
     }
 
     [TestMethod]
@@ -182,7 +183,7 @@ public sealed class UpdaterTests
             Assert.AreEqual(before, checks);
             await updates.RefreshAsync(now);
             Assert.AreEqual(before + 1, checks);
-            Assert.IsTrue(updates.Available);
+            Assert.AreEqual("0.1.10", updates.Offer?.Version);
         }
         offline = false;
         now = now.AddHours(1);
