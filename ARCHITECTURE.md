@@ -115,9 +115,12 @@ sign-in secrets. URL logging strips the query and fragment; only selected, bound
   serializes edits under a writer lock and replaces the file. The running helper retains the last valid settings
   on a malformed edit. `host.log` records helper activity; `update.log` records the latest tray update.
 - **Tray:** [TrayIcon](src/AuthBridge/Host/Tray/TrayIcon.cs) runs a WinForms message loop on an STA thread.
-  `NotifyIcon` manages the Explorer icon; a `ContextMenuStrip` and an About form use the system color mode selected
-  at startup. A separate hidden [control window](src/AuthBridge/Host/Tray/TrayControlWindow.cs) receives stop and
-  idle-update requests addressed to the helper's PID, even without Explorer or with About open.
+  `NotifyIcon` manages the Explorer icon; the menu and its Status and About dialogs use the system color mode selected
+  at startup. [Status](src/AuthBridge/Host/Tray/StatusDialog.cs) reads the same in-process snapshot as `/v1/ping`
+  on opening. While visible, it shows the snapshot used for the tray icon on each two-second tick; it makes no
+  network requests. A separate hidden [control window](src/AuthBridge/Host/Tray/TrayControlWindow.cs) owns the
+  active dialog and receives stop and idle-update requests addressed to the helper's PID, even without Explorer or
+  with a dialog open.
 - **Linux:** The client is installed at `~/.local/bin/authbridge`. It locates `~/.authbridge` using the account's
   home directory rather than a caller's `$HOME`. This directory holds tunnel sockets, the client install lock,
   and `client.log`. Relay sessions, pending replies, and one-use browser links live in memory, not in either

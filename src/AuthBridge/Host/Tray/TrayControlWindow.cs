@@ -2,20 +2,33 @@ using System.Runtime.InteropServices;
 
 namespace AuthBridge.Host;
 
-/// <summary>The hidden window used by the stop command and the updater, independent of Explorer's tray icon.</summary>
+/// <summary>Owns the tray dialogs and receives stop and idle-update requests independently of Explorer.</summary>
 internal sealed partial class TrayControlWindow : NativeWindow, IDisposable
 {
     private const string WindowCaption = "AuthBridgeTray";
     private const int CloseMessage = 0x0010, AutomaticUpdateReady = 0x8002;
     private const uint AbortIfHung = 0x0002;
     private readonly TrayUpdater _updates;
-    private readonly Action _close;
 
-    public TrayControlWindow(TrayUpdater updates, Action close)
+    public TrayControlWindow(TrayUpdater updates)
     {
         _updates = updates;
-        _close = close;
         CreateHandle(new CreateParams { Caption = WindowCaption });
+    }
+
+    public Form? OpenDialog { get; private set; }
+
+    public void ShowDialog(Form dialog)
+    {
+        OpenDialog = dialog;
+        try
+        {
+            dialog.ShowDialog(this);
+        }
+        finally
+        {
+            OpenDialog = null;
+        }
     }
 
     public void Dispose() => DestroyHandle();
@@ -28,7 +41,8 @@ internal sealed partial class TrayControlWindow : NativeWindow, IDisposable
         switch (message.Msg)
         {
             case CloseMessage:
-                _close();
+                OpenDialog?.Close();
+                Application.ExitThread();
                 return;
             case AutomaticUpdateReady:
                 message.Result = _updates.TryRequestIdleRestart((int)message.WParam, PostClose) ? 1 : 0;

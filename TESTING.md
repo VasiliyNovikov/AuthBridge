@@ -8,8 +8,9 @@ on Linux x64 and Arm64 and on Windows x64:
 - **Integration tests** send a callback through the helper and relay over real loopback sockets and check the
   application's response. They simulate tunnel drops to verify the callback is not replayed. Linux tests also run
   shell setup and upload commands through `sh`.
-- **Windows tray tests** exercise the WinForms menu's saved check mark and stale update offer, then send real stop
-  and idle-update messages to a test tray thread. They do not install or stop the user's helper.
+- **Windows tray tests** open Status from the menu and check tunnel details, updates, and the empty state after
+  reopening. They also cover the saved check mark, stale update offers, and real stop and idle-update messages to a
+  test tray thread. They do not install or stop the user's helper.
 
 CI runs two additional kinds of tests:
 

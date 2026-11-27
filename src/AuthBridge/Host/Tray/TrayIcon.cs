@@ -4,7 +4,7 @@ namespace AuthBridge.Host;
 
 internal sealed class TrayIcon(Thread thread, TrayControlWindow window) : IDisposable
 {
-    public static TrayIcon Start(Func<TunnelStatus[]> tunnels, TrayUpdater updates, Action exit)
+    public static TrayIcon Start(Helper helper, TrayUpdater updates, Action exit)
     {
         var ready = new TaskCompletionSource<TrayControlWindow>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -12,7 +12,7 @@ internal sealed class TrayIcon(Thread thread, TrayControlWindow window) : IDispo
             try
             {
                 using (updates)
-                    Run(tunnels, updates, ready);
+                    Run(helper, updates, ready);
             }
             catch (Exception e)
             {
@@ -29,7 +29,7 @@ internal sealed class TrayIcon(Thread thread, TrayControlWindow window) : IDispo
         return new TrayIcon(thread, ready.Task.GetAwaiter().GetResult());
     }
 
-    private static void Run(Func<TunnelStatus[]> tunnels, TrayUpdater updates, TaskCompletionSource<TrayControlWindow> ready)
+    private static void Run(Helper helper, TrayUpdater updates, TaskCompletionSource<TrayControlWindow> ready)
     {
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException, threadScope: true);
         Application.ThreadException += (_, e) => Log.Error(e.Exception, "tray action failed");
@@ -40,19 +40,18 @@ internal sealed class TrayIcon(Thread thread, TrayControlWindow window) : IDispo
         using var resource = typeof(TrayIcon).Assembly.GetManifestResourceStream("AuthBridge.ico")!;
         using var icon = new Icon(resource);
         using var about = AboutDialog.Create(icon);
-        using var window = new TrayControlWindow(updates, () =>
-        {
-            if (about.Visible)
-                about.Close();
-            Application.ExitThread();
-        });
-        using var menu = TrayMenu.Create(updates, about, window);
-        using var status = new StatusIcon(icon, menu, window);
+        using var status = new StatusDialog(icon, helper.Port, helper.GetStatus);
+        using var window = new TrayControlWindow(updates);
+        using var menu = TrayMenu.Create(updates, status.Window, about, window);
+        using var notification = new StatusIcon(icon, menu, window);
         using var timer = new System.Windows.Forms.Timer { Interval = 2000 };
         void Refresh()
         {
             updates.Refresh();
-            status.Show(tunnels());
+            var snapshot = helper.GetStatus();
+            notification.Show(snapshot.Tunnels);
+            if (status.Window.Visible)
+                status.Update(snapshot);
         }
         timer.Tick += (_, _) => Refresh();
         Refresh();

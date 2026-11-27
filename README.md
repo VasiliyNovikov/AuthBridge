@@ -152,9 +152,11 @@ to check a named tunnel on Windows or hand off a Linux sign-in to the user's bro
 | `authbridge --setup-shell`, `--setup-gcm`, `--setup-nuget`, `--setup-all` | Configure the shell and integrations. |
 
 On Windows, the dot on the helper's notification area icon is green when all machines are connected, yellow when some
-are, and gray when none are. Hover over it for each machine's state. Right-click to open the log, exit, or choose
-**About** to see the helper's version. On Windows 11 and later, the menu and About window use the Windows
-app theme selected when the helper starts. Restart the helper to pick up a light/dark change. Contrast themes take
+are, and gray when none are. Right-click and choose **Status** for a live list of machines, tunnel states, last state
+changes, client versions, and connection errors. The dialog also shows the helper's version, machine,
+PID, listening address, and active relay count. Hover over the icon for a quick summary.
+The menu also lets you open the log, exit, or choose **About**. On Windows 11 and later, the menu and dialogs use the
+Windows app theme selected when the helper starts. Restart the helper to pick up a light/dark change. Contrast themes take
 precedence; Windows 10 uses the standard system colors.
 The helper checks for updates at startup and every five minutes using only GitHub's release redirect headers.
 If checks fail, it keeps the last known result and waits longer between attempts, up to an hour. When a newer release

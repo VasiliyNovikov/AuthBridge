@@ -43,8 +43,9 @@ public sealed class TrayTests
             await using var helper = new Helper(_ => { }, () => [], () => null);
             using var updates = new TrayUpdater(settings, releases, helper, _ => throw new AssertFailedException("Launched a stale update."));
             using var about = AboutDialog.Create(SystemIcons.Application);
-            using var window = new TrayControlWindow(updates, () => Assert.Fail("Unexpected shutdown."));
-            using var menu = TrayMenu.Create(updates, about, window);
+            using var status = new Form();
+            using var window = new TrayControlWindow(updates);
+            using var menu = TrayMenu.Create(updates, status, about, window);
             menu.Opening += (_, e) => e.Cancel = true; // Prepare the actual menu without displaying it.
             var automatic = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Auto-update");
             var update = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Update");
@@ -70,6 +71,54 @@ public sealed class TrayTests
         }
     }
 
+    [STATestMethod]
+    public async Task StatusMenuShowsFreshConnectionsAndRemovesStaleRows()
+    {
+        var since = DateTimeOffset.Now.AddMinutes(-5);
+        var dev = new TunnelStatus("dev", "connected", "", since, "1.2.3", "/dev.sock");
+        var build = new TunnelStatus("build", "disconnected", "network unavailable", since);
+        var snapshot = new PingResult(Protocol.Version, 42, 2, [dev, build], "workstation");
+        await using var helper = new Helper(_ => { }, () => [], () => null);
+        var settings = new HostSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()), message => Assert.Fail(message));
+        using var updates = new TrayUpdater(settings, new UpdateCheck(_ => Task.FromResult("1.0"), "1.0"), helper);
+        using var status = new StatusDialog(SystemIcons.Application, 12345, () => snapshot);
+        using var about = new Form();
+        about.Load += (_, _) => about.DialogResult = DialogResult.Cancel;
+        using var window = new TrayControlWindow(updates);
+        using var menu = TrayMenu.Create(updates, status.Window, about, window);
+        var command = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Status");
+        status.Window.Opacity = 0;
+        status.Window.VisibleChanged += (_, _) =>
+        {
+            if (status.Window.Visible)
+                status.Window.BeginInvoke(status.Window.Close);
+        };
+        command.PerformClick();
+
+        var summary = status.Window.Controls.OfType<Label>().Single();
+        var connections = status.Window.Controls.OfType<ListView>().Single();
+        Assert.DoesNotContain("Remote socket", connections.Columns.Cast<ColumnHeader>().Select(column => column.Text));
+        var rows = connections.Items;
+        StringAssert.Contains(summary.Text, "workstation");
+        StringAssert.Contains(summary.Text, "127.0.0.1:12345");
+        StringAssert.Contains(summary.Text, "1/2 connected");
+        StringAssert.Contains(summary.Text, "Active relay sessions: 2");
+        var first = rows[0];
+        CollectionAssert.AreEqual(new[] { "dev", "connected", since.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss"), "1.2.3", "" },
+            first.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(cell => cell.Text).ToArray());
+        Assert.AreEqual("network unavailable", rows[1].SubItems[4].Text);
+
+        status.Update(snapshot with { Tunnels = [dev with { Client = "1.2.4" }] });
+        Assert.HasCount(1, rows);
+        Assert.AreSame(first, rows[0]);
+        Assert.AreEqual("1.2.4", first.SubItems[3].Text);
+        snapshot = snapshot with { Tunnels = [], Sessions = 0 };
+        command.PerformClick();
+        Assert.IsEmpty(rows);
+        StringAssert.Contains(summary.Text, "No machines configured");
+        StringAssert.Contains(summary.Text, "Active relay sessions: 0");
+    }
+
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
@@ -83,9 +132,10 @@ public sealed class TrayTests
             var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
             await releases.RefreshAsync(DateTime.UtcNow);
             await using var helper = new Helper(_ => { }, () => [], () => null);
+            helper.Start(0);
             var updates = new TrayUpdater(settings, releases, helper, _ => Process.GetCurrentProcess());
             var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var tray = TrayIcon.Start(() => [], updates, stopped.SetResult);
+            using var tray = TrayIcon.Start(helper, updates, stopped.SetResult);
             Assert.AreEqual(automatic, TrayControlWindow.RequestIdleExit(Environment.ProcessId));
             if (!automatic)
             {

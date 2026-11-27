@@ -41,7 +41,7 @@ internal static partial class HelperHost
         Console.CancelKeyPress += OnCancel;
         try
         {
-            using var tray = TrayIcon.Start(tunnels.Statuses, new TrayUpdater(settings, updates, helper), RequestStop);
+            using var tray = TrayIcon.Start(helper, new TrayUpdater(settings, updates, helper), RequestStop);
             using var stopping = new CancellationTokenSource();
             Log.Info($"helper listening on 127.0.0.1:{helper.Port} (pid {Environment.ProcessId})");
             var maintenance = MaintainAsync(helper, settings, tunnels, updates, stopping.Token);
