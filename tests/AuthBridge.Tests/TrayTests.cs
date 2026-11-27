@@ -55,7 +55,7 @@ public sealed class TrayTests
             await releases.RefreshAsync(now);
             settings.SetUpdateAutomatically(true);
             menu.Show(Point.Empty);
-            var update = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Check...");
+            var update = menu.Items.OfType<ToolStripMenuItem>().Single(item => item.Text == "Check for updates");
             Assert.IsTrue(update.Available && update.Enabled);
             Assert.IsTrue(automatic.Checked);
 
@@ -67,7 +67,7 @@ public sealed class TrayTests
             latest = "2.0";
             update.PerformClick(); // Do not wait for the next scheduled check, even after a failure.
             StringAssert.Contains(messages[^1], "2.0");
-            Assert.AreEqual("Update ... 2.0", update.Text);
+            Assert.AreEqual("Update to 2.0", update.Text);
             latest = "3.0";
             await releases.RefreshAsync(now.AddMinutes(6));
             update.PerformClick();
@@ -76,7 +76,7 @@ public sealed class TrayTests
             Assert.IsFalse(settings.UpdateAutomatically);
             menu.Show(Point.Empty);
             Assert.IsFalse(automatic.Checked);
-            Assert.AreEqual("Update ... 3.0", update.Text);
+            Assert.AreEqual("Update to 3.0", update.Text);
             update.PerformClick();
             CollectionAssert.AreEqual(new[] { false }, launches);
             Assert.IsTrue(update.Available);

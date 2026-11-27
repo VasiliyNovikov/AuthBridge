@@ -33,12 +33,13 @@ internal static class TrayMenu
 
     private static void AddUpdateItem(ContextMenuStrip menu, TrayUpdater updates, Action<string> report)
     {
-        var item = menu.Items.Add("Check...");
+        const string checkLabel = "Check for updates";
+        var item = menu.Items.Add(checkLabel);
         string? displayedVersion = null;
         void Refresh()
         {
             displayedVersion = updates.AvailableVersion;
-            item.Text = displayedVersion is null ? "Check..." : $"Update ... {displayedVersion}";
+            item.Text = displayedVersion is null ? checkLabel : $"Update to {displayedVersion}";
             item.Enabled = !updates.IsBusy;
         }
         menu.Opening += (_, _) => Refresh();
