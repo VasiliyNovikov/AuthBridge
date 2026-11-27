@@ -68,17 +68,16 @@ internal sealed class StatusDialog : IDisposable
             $"{connections}  |  Active relay sessions: {status.Sessions}";
 
         for (var i = 0; i < tunnels.Length; i++)
-        {
-            var row = i < _connections.Items.Count ? _connections.Items[i] : _connections.Items.Add("");
-            if (!Equals(row.Tag, tunnels[i]))
-                UpdateRow(row, tunnels[i]);
-        }
+            UpdateRow(i, tunnels[i]);
         while (_connections.Items.Count > tunnels.Length)
             _connections.Items.RemoveAt(_connections.Items.Count - 1);
     }
 
-    private static void UpdateRow(ListViewItem row, TunnelStatus tunnel)
+    private void UpdateRow(int index, TunnelStatus tunnel)
     {
+        var row = index < _connections.Items.Count ? _connections.Items[index] : _connections.Items.Add("");
+        if (Equals(row.Tag, tunnel))
+            return;
         if (row.Text != tunnel.Name)
             row.Selected = false;
         row.Tag = tunnel;
