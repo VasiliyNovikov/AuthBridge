@@ -6,14 +6,14 @@ namespace AuthBridge.Tests;
 [TestClass]
 public sealed class ClientCommandTests
 {
-    private static ClientCommandLine Commands(Func<string[], bool, Task<int>>? open = null,
-        Func<string, string[], Task<int>>? gcm = null, Func<string[], Task<int>>? nugetPlugin = null,
-        Func<string, string, int, string?, Task<int>>? relay = null, Func<int, string, string, Task<int>>? cancel = null)
-    {
-        static Task<int> Unexpected() => throw new AssertFailedException("Unexpected command invocation.");
-        return new(open ?? ((_, _) => Unexpected()), gcm ?? ((_, _) => Unexpected()), nugetPlugin ?? (_ => Unexpected()),
-            relay ?? ((_, _, _, _) => Unexpected()), cancel ?? ((_, _, _) => Unexpected()), Cli.Command("--setup-shell", "", Unexpected));
-    }
+    /// <summary>Handlers that fail the test; each test replaces those that it expects to run.</summary>
+    private static readonly ClientHandlers Unexpected = new((_, _) => UnexpectedCall(), (_, _) => UnexpectedCall(),
+        _ => UnexpectedCall(), (_, _, _, _) => UnexpectedCall(), (_, _, _) => UnexpectedCall());
+
+    private static Task<int> UnexpectedCall() => throw new AssertFailedException("Unexpected command invocation.");
+
+    private static ClientCommandLine Commands(ClientHandlers? handlers = null) =>
+        new(handlers ?? Unexpected, Cli.Command("--setup-shell", "", UnexpectedCall));
 
     [TestMethod]
     [DataRow("--help")]
@@ -59,10 +59,13 @@ public sealed class ClientCommandTests
     public async Task BrowserReceivesUrlsInOrderAndDryRunSeparately()
     {
         string[] urls = ["https://first.example", "https://second.example"];
-        var cli = Commands(open: (arguments, dryRun) =>
+        var cli = Commands(Unexpected with
         {
-            CollectionAssert.AreEqual(urls, arguments);
-            return Task.FromResult(dryRun ? 13 : 7);
+            Open = (arguments, dryRun) =>
+            {
+                CollectionAssert.AreEqual(urls, arguments);
+                return Task.FromResult(dryRun ? 13 : 7);
+            },
         });
         Assert.AreEqual(13, await Cli.InvokeAsync(cli, [urls[0], "--dry-run", urls[1]]));
         Assert.AreEqual(7, await Cli.InvokeAsync(cli, urls));
@@ -74,15 +77,19 @@ public sealed class ClientCommandTests
     [DataRow("--", "payload")]
     public async Task WrappersPassArgumentsVerbatim(params string[] arguments)
     {
-        var cli = Commands(gcm: (program, rest) =>
+        var cli = Commands(Unexpected with
         {
-            Assert.AreEqual("/bin/git credential", program);
-            CollectionAssert.AreEqual(arguments, rest);
-            return Task.FromResult(17);
-        }, nugetPlugin: rest =>
-        {
-            CollectionAssert.AreEqual(arguments, rest);
-            return Task.FromResult(23);
+            Gcm = (program, rest) =>
+            {
+                Assert.AreEqual("/bin/git credential", program);
+                CollectionAssert.AreEqual(arguments, rest);
+                return Task.FromResult(17);
+            },
+            NuGetPlugin = rest =>
+            {
+                CollectionAssert.AreEqual(arguments, rest);
+                return Task.FromResult(23);
+            },
         });
         Assert.AreEqual(17, await Cli.InvokeAsync(cli, ["--gcm", "/bin/git credential", .. arguments]));
         Assert.AreEqual(23, await Cli.InvokeAsync(cli, ["--nuget-plugin", .. arguments]));
@@ -103,15 +110,19 @@ public sealed class ClientCommandTests
     [DataRow("42@test pc")]
     public async Task WorkersReceiveTheTypedPortAndTheirOwnArguments(string? expectedOwner)
     {
-        var cli = Commands(relay: (socket, session, port, owner) =>
+        var cli = Commands(Unexpected with
         {
-            Assert.AreEqual(("socket", "session-id", 65535), (socket, session, port));
-            Assert.AreEqual(expectedOwner, owner);
-            return Task.FromResult(17);
-        }, cancel: (port, url, reason) =>
-        {
-            Assert.AreEqual((1, "https://login.example/", "not connected"), (port, url, reason));
-            return Task.FromResult(23);
+            Relay = (socket, session, port, owner) =>
+            {
+                Assert.AreEqual(("socket", "session-id", 65535), (socket, session, port));
+                Assert.AreEqual(expectedOwner, owner);
+                return Task.FromResult(17);
+            },
+            Cancel = (port, url, reason) =>
+            {
+                Assert.AreEqual((1, "https://login.example/", "not connected"), (port, url, reason));
+                return Task.FromResult(23);
+            },
         });
         string[] ownerArgument = expectedOwner is null ? [] : [expectedOwner];
         Assert.AreEqual(17, await Cli.InvokeAsync(cli, ["__relay", "socket", "session-id", "65535", .. ownerArgument]));

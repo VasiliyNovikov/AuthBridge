@@ -196,7 +196,7 @@ public sealed class RelayTests
         int? idle = 5;
         await using var helper = new Helper(_ => Assert.Fail("Ping does not open a browser."), () => tunnels, () => idle);
         helper.Start(0);
-        using var bridge = ControlClient.ForPort(helper.Port);
+        using var bridge = ClientFor(helper);
 
         var first = await bridge.PingAsync(TimeSpan.FromSeconds(5));
         Assert.IsNotNull(first);
@@ -250,8 +250,7 @@ public sealed class RelayTests
         using var dropped = ControlClient.ForPort(droppedPort);
         var relayPort = FreePort();
 
-        var workers = new List<string[]>();
-        var opener = new BrowserClient(workers.Add, TextWriter.Null);
+        var (opener, workers) = RecordingOpener();
         Assert.AreEqual(0, await opener.OpenAsync(Open(relayPort), bridge));
         var worker = workers.Single();
         var session = worker[2];
@@ -288,8 +287,7 @@ public sealed class RelayTests
         Assert.AreEqual(409, status);
         Assert.IsNull(session);
 
-        var workers = new List<string[]>();
-        var opener = new BrowserClient(workers.Add, TextWriter.Null);
+        var (opener, workers) = RecordingOpener();
         Assert.AreEqual(0, await opener.OpenAsync(request, bridge));
         var cancel = workers.Single();
         CollectionAssert.AreEqual(new[] { "__cancel", port.ToString(), request.Url }, cancel[..3]);
@@ -299,9 +297,8 @@ public sealed class RelayTests
     [TestMethod]
     public async Task DisconnectedClientOffersManualSignInUnlessItCanNotifyTheApplication()
     {
-        var workers = new List<string[]>();
         using var messages = new StringWriter();
-        var opener = new BrowserClient(workers.Add, messages);
+        var (opener, workers) = RecordingOpener(messages);
         var request = Open(45678, includeState: false);
 
         Assert.AreEqual(1, await opener.OpenAsync(request, null));
@@ -317,7 +314,7 @@ public sealed class RelayTests
     public async Task ASecondOpenCannotEvictAnActiveSessionOnTheSamePort()
     {
         await using var helper = StartHelper();
-        using var client = ControlClient.ForPort(helper.Port);
+        using var client = ClientFor(helper);
         var request = Open(FreePort());
         var original = await client.OpenAsync(request);
         Assert.IsNotNull(original.Session);
@@ -332,10 +329,9 @@ public sealed class RelayTests
     {
         using var directory = new TempDirectory("authbridge-idle-update-");
         var settings = NewSettings(Path.Combine(directory.FullName, "config.json"));
-        var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
-        await releases.RefreshAsync(DateTime.UtcNow);
+        var releases = await OfferUpdateAsync();
         await using var helper = StartHelper();
-        using var client = ControlClient.ForPort(helper.Port);
+        using var client = ClientFor(helper);
         var launches = 0;
         using var tray = new TrayUpdater(settings, releases, helper, automatic =>
         {
@@ -376,7 +372,7 @@ public sealed class RelayTests
     public async Task RepeatedPollRecoversTheUnansweredRequestButNotAnAnsweredOne()
     {
         await using var helper = StartHelper();
-        using var client = ControlClient.ForPort(helper.Port);
+        using var client = ClientFor(helper);
         var port = FreePort();
         var session = (await client.OpenAsync(Open(port))).Session!;
         using var browser = new HttpClient(new HttpClientHandler { UseProxy = false });
@@ -394,8 +390,7 @@ public sealed class RelayTests
     public async Task LosingTheTunnelAfterDiscoveryCancelsTheWaitingApplication()
     {
         using var dropped = new Bridge.Connection(ControlClient.ForPort(FreePort()), new(Protocol.Version, 1, 0, []), DateTime.UtcNow);
-        var workers = new List<string[]>();
-        var browser = new BrowserClient(workers.Add, TextWriter.Null);
+        var (browser, workers) = RecordingOpener();
         var request = Open(45678);
         Assert.AreEqual(0, await browser.OpenAsync(request, dropped));
         CollectionAssert.AreEqual(new[] { "__cancel", "45678", request.Url }, workers.Single()[..3]);
@@ -461,21 +456,12 @@ public sealed class RelayTests
     public async Task ClosedSessionEndsTheRelayEvenBeforeTheApplicationStartsListening()
     {
         const string session = "ended-session";
-        var requests = new ConcurrentQueue<string>();
-        await using var helper = Serve(request =>
-        {
-            requests.Enqueue($"{request.Method} {request.Target.Split('?')[0]}");
-            return new HttpResponse(requests.Count == 1 ? 204 : 404, [], []);
-        });
-        using var bridge = ControlClient.ForPort(helper.Port);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         using var closed = ReserveClosedPort(out var applicationPort);
 
-        await Relay.RunAsync(bridge, session, applicationPort, stop.Token);
+        var requests = await RelayEndingSessionAsync(session, applicationPort, request => $"{request.Method} {request.Target.Split('?')[0]}");
 
-        Assert.IsFalse(stop.IsCancellationRequested);
         CollectionAssert.AreEqual(new[] { $"GET /v1/sessions/{session}/next", $"GET /v1/sessions/{session}/next",
-            $"POST /v1/sessions/{session}/close" }, requests.ToArray());
+            $"POST /v1/sessions/{session}/close" }, requests);
     }
 
     [TestMethod]
@@ -500,17 +486,12 @@ public sealed class RelayTests
         using var application = new TcpListener(IPAddress.Loopback, 0);
         application.Start();
         var port = ((IPEndPoint)application.LocalEndpoint).Port;
-        var requests = new ConcurrentQueue<string>();
-        await using var helper = Serve(request =>
+        var requests = await RelayEndingSessionAsync("finished-session", port, request =>
         {
-            requests.Enqueue(request.Method);
             application.Stop();
-            return new HttpResponse(requests.Count == 1 ? 204 : 404, [], []);
+            return request.Method;
         });
-        using var bridge = ControlClient.ForPort(helper.Port);
-        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await Relay.RunAsync(bridge, "finished-session", port, stop.Token);
-        CollectionAssert.AreEqual(new[] { "GET", "POST" }, requests.ToArray());
+        CollectionAssert.AreEqual(new[] { "GET", "POST" }, requests);
     }
 
     [TestMethod]
@@ -531,14 +512,18 @@ public sealed class RelayTests
         });
         await using (var session = new Relay.HelperSession(initial, "retry-session", Reconnect, TimeSpan.Zero))
         {
-            for (var i = 0; i < 14; i++)
-                Assert.IsTrue(await session.PollAsync(port, stop.Token));
+            // Fourteen unreachable polls stay within the budget, so each keeps the session.
+            async Task PollOfflineWithinBudgetAsync()
+            {
+                for (var i = 0; i < 14; i++)
+                    Assert.IsTrue(await session.PollAsync(port, stop.Token));
+            }
+            await PollOfflineWithinBudgetAsync();
             Volatile.Write(ref online, true);
             Assert.IsTrue(await session.PollAsync(port, stop.Token));
             Assert.AreEqual(14, retries);
             Volatile.Write(ref online, false);
-            for (var i = 0; i < 14; i++)
-                Assert.IsTrue(await session.PollAsync(port, stop.Token));
+            await PollOfflineWithinBudgetAsync();
             Assert.IsFalse(await session.PollAsync(port, stop.Token));
             Assert.AreEqual(28, retries);
             await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => restored.PingAsync(TimeSpan.FromSeconds(1)));
@@ -674,8 +659,34 @@ public sealed class RelayTests
         await Http.WriteResponseAsync(stream, new HttpResponse(200, [], body), includeBody: true, cancel);
     }
 
+    /// <summary>Relays a session that has no browser request on the first poll and is gone after that, and returns the
+    /// helper requests in the form <paramref name="describe"/> gives them.</summary>
+    private static async Task<string[]> RelayEndingSessionAsync(string session, int applicationPort, Func<HttpRequest, string> describe)
+    {
+        var requests = new ConcurrentQueue<string>();
+        await using var helper = Serve(request =>
+        {
+            requests.Enqueue(describe(request));
+            return new HttpResponse(requests.Count == 1 ? 204 : 404, [], []);
+        });
+        using var bridge = ControlClient.ForPort(helper.Port);
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await Relay.RunAsync(bridge, session, applicationPort, stop.Token);
+        Assert.IsFalse(stop.IsCancellationRequested);
+        return [.. requests];
+    }
+
+    /// <summary>A browser client that records the workers it would start instead of starting them.</summary>
+    private static (BrowserClient Opener, List<string[]> Workers) RecordingOpener(TextWriter? messages = null)
+    {
+        List<string[]> workers = [];
+        return (new BrowserClient(workers.Add, messages ?? TextWriter.Null), workers);
+    }
+
+    private static ControlClient ClientFor(Helper helper) => ControlClient.ForPort(helper.Port);
+
     private static Bridge.Connection Connect(Helper helper) =>
-        new(ControlClient.ForPort(helper.Port), new(Protocol.Version, Environment.ProcessId, 0, [], "test PC"), DateTime.UtcNow);
+        new(ClientFor(helper), new(Protocol.Version, Environment.ProcessId, 0, [], "test PC"), DateTime.UtcNow);
 
     private static OpenRequest Open(int port, bool includeState = true) =>
         new($"https://login.example/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A{port}" + (includeState ? "&state=test" : ""), port, DryRun: true, "test");

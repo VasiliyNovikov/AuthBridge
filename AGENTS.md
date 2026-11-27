@@ -11,8 +11,9 @@ Requires the .NET 11 SDK (pinned in `global.json`).
 
 ```shell
 dotnet test              # builds and runs the tests (MSTest on Microsoft.Testing.Platform)
-dotnet crap.cs           # runs the Release tests with coverage and checks the whole-app CRAP load
+dotnet crap.cs           # runs the Release tests with coverage and checks every method's CRAP score
 dotnet coupling.cs       # reports and gates all six Roslyn code metrics
+dotnet duplication.cs    # reports and gates repeated code in all C#, including tests and these scripts
 dotnet release.cs 1.2.3  # self-contained single-file binaries (trimmed on Linux) and release zips in ./artifacts
 ```
 
@@ -22,7 +23,7 @@ the Linux clients print their version, and the Windows runners check the executa
 repeat installation in place, verify its logon command and user PATH entry, and stop it. For a `vX.Y.Z` tag, CI
 publishes those same packages as a GitHub release.
 
-`code-metrics-baseline.props` is the single source for the Roslyn, CRAP and mutation gate thresholds.
+`code-metrics-baseline.props` is the single source for the Roslyn, CRAP, duplication and mutation gate thresholds.
 
 The root scripts are file-based apps that share `eng/Repository.cs` through `#:include`. It finds the repository root,
 reads that baseline, clears outputs that an earlier run left in `artifacts/`, and starts child builds with the `dotnet`
@@ -33,17 +34,14 @@ that runs the script, so that they use the SDK from `global.json`.
 The Ubuntu 24.04 x64 test job runs `dotnet crap.cs` instead of running the tests twice. The script restores the
 repo-local Crap4DotNet tool and analyzes `src/AuthBridge` (not tests, build scripts, `bin`, or `obj`) using Cobertura
 coverage from Coverlet's MTP extension. Crap4DotNet prefers branch coverage and falls back to line coverage when
-branch data is unavailable. Compiler changes such as runtime async can therefore change the measured load without
+branch data is unavailable. Compiler changes such as runtime async can therefore change the measured scores without
 changing source complexity. The `crap-analysis` CI artifact and local `artifacts/crap/` directory contain `report.json`
 with the method scores and matching warnings, and `coverage.cobertura.xml`.
 
-The gate compares **total CRAP load**, not the sum or average of the method scores. A method's score is
-`complexity^2 * (1 - coverage)^3 + complexity`, where coverage is a fraction. Only methods scoring **above**
-`crapMethodThreshold` contribute load: `complexity * (1 - coverage) + complexity / threshold`. CI fails if their
-combined load, rounded to three decimal places, exceeds `maxTotalCrapLoad`.
+A method's score is `complexity^2 * (1 - coverage)^3 + complexity`, where coverage is a fraction. CI fails if any
+method scores **above** `crapMethodThreshold`, and the log lists those methods.
 [Crap4DotNet](https://github.com/7Factor/crap4dotnet#what-is-crap) defaults to a per-method cutoff of 30; keep our
-stricter 25. The load ceiling is zero because no method currently exceeds the cutoff on Linux x64, not because
-there is a universal project-wide load target. CI never rewrites it. Other platforms' coverage can differ.
+stricter 25. CI measures on Linux x64; other platforms' coverage can differ.
 
 ### Roslyn code metrics
 
@@ -85,6 +83,20 @@ failure. The log names a worst symbol for each metric. The `class-coupling` arti
 contain `report.json` (per-type dependencies and per-method measurements) and `observed.json` (the six extremes,
 keyed by baseline property name), including when a limit is crossed. To tighten a limit, copy its improved value
 from `observed.json` into `code-metrics-baseline.props` in a reviewed change. CI never rewrites the baseline.
+
+### Duplicated code
+
+The Ubuntu x64 job also runs `dotnet duplication.cs`. It lexes all C# in the repository with Roslyn, including the
+tests and these scripts but not `bin`, `obj`, `artifacts` or `StrykerOutput`. `WINDOWS` is defined, as in the Windows
+build, so only the Linux branch of `Program.Main` is left out. Using directives are ignored.
+
+A clone is a sequence of at least `minCloneTokens` (25) tokens, about two lines of code, that appears more than once.
+Whitespace, comments and line breaks cannot hide a copy, but different names or literals make code distinct. Matches
+that overlap within one file count once. Any clone fails CI, which blocks tagged releases. A repeated constant or a
+single short call is below the threshold and still needs review.
+
+The `duplication` artifact and local `artifacts/duplication/report.json` list each clone's token count and the file and
+lines of every copy. Replace a reported copy with a shared helper or a local function rather than raising the threshold.
 
 ### Mutation testing
 
@@ -132,8 +144,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - `src/AuthBridge/Common/`: minimal HTTP/1.1 server and messages, control API protocol and client, OAuth URL helpers,
   release version information (`AppVersion`), logging and paths.
 - `tests/AuthBridge.Tests/`: a few focused tests, including an in-process relay round trip (`RelayTests`). Reuse the
-  setup in `TestSupport.cs`: temporary directories, loopback servers, helpers, settings and console redirection.
-- `eng/Repository.cs`: what the root file-based apps (`crap.cs`, `coupling.cs`, `release.cs` and
+  setup in `TestSupport.cs`: temporary directories, loopback servers, helpers, settings, update offers and console
+  redirection.
+- `eng/Repository.cs`: what the root file-based apps (`crap.cs`, `coupling.cs`, `duplication.cs`, `release.cs` and
   `check-mutation-score.cs`) share.
 - `install.ps1`: the installer behind `irm ... | iex`. It only downloads the latest release and runs its
   `authbridge install`, and it must also run in Windows PowerShell 5.1.

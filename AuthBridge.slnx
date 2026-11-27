@@ -17,6 +17,7 @@
     <File Path="crap.cs" />
     <File Path="Directory.Build.props" />
     <File Path="dotnet-tools.json" />
+    <File Path="duplication.cs" />
     <File Path="global.json" />
     <File Path="install.ps1" />
     <File Path="LICENSE" />

@@ -5,9 +5,8 @@ using System.Text.Json;
 
 var baseline = Repository.LoadBaseline();
 var threshold = (int)baseline["crapMethodThreshold"];
-var ceiling = (decimal)baseline["maxTotalCrapLoad"];
-if (threshold <= 0 || ceiling < 0)
-    throw new InvalidDataException("The CRAP method threshold must be positive and the load ceiling nonnegative.");
+if (threshold <= 0)
+    throw new InvalidDataException("The CRAP method threshold must be positive.");
 
 var coverage = Repository.Artifact("crap", "coverage.cobertura.xml");
 var report = Repository.Artifact("crap", "report.json");
@@ -36,21 +35,21 @@ finally
 
 var analysis = Repository.Dotnet("tool", "run", "dotnet-crap", "--", "analyze", Path.Combine("src", "AuthBridge", "AuthBridge.csproj"),
     "--coverage", coverage, "--threshold", threshold.ToString(CultureInfo.InvariantCulture), "--output", report);
-// Exit 1 means there are hotspots, not that analysis failed. The project's gate is their combined load.
+// Exit 1 means that some methods score above the threshold, which the gate reports below.
 if (analysis is not (0 or 1))
     return analysis;
 
 using var measured = JsonDocument.Parse(File.ReadAllBytes(report));
-var root = measured.RootElement;
-if (!root.GetProperty("methods").EnumerateArray().Any(method => method.GetProperty("coverage").GetDouble() > 0))
+var methods = measured.RootElement.GetProperty("methods").EnumerateArray().ToArray();
+if (!methods.Any(method => method.GetProperty("coverage").GetDouble() > 0))
     throw new InvalidDataException("The report contains no covered AuthBridge methods; check the coverage collector.");
-var stats = root.GetProperty("stats");
-var load = Math.Round(stats.GetProperty("totalCrapLoad").GetDecimal(), 3, MidpointRounding.AwayFromZero);
-Console.WriteLine(FormattableString.Invariant(
-    $"Total CRAP load: {load:F3} (baseline {ceiling:F3}); {stats.GetProperty("crappyMethodCount")} of {stats.GetProperty("methodCount")} methods above {threshold}."));
-if (load > ceiling)
+// No method may score above the threshold.
+var crappy = methods.Where(method => method.GetProperty("crap").GetDouble() > threshold).ToArray();
+foreach (var method in crappy)
 {
-    Console.Error.WriteLine("CRAP load exceeds the baseline. See artifacts/crap/report.json for individual methods.");
-    return 1;
+    var (score, covered) = (method.GetProperty("crap").GetDouble(), method.GetProperty("coverage").GetDouble());
+    Console.Error.WriteLine(FormattableString.Invariant(
+        $"CRAP {score:F1}: {method.GetProperty("fullName").GetString()} (complexity {method.GetProperty("complexity").GetInt32()}, coverage {100 * covered:F0}%)"));
 }
-return 0;
+Console.WriteLine($"{crappy.Length} of {methods.Length} methods score above {threshold}.");
+return crappy.Length == 0 ? 0 : 1;

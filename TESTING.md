@@ -21,7 +21,8 @@ CI runs two additional kinds of tests:
   and graceful shutdown.
 
 On Linux x64, CI also uses native test coverage for the CRAP complexity gate. The separate Roslyn report targets
-the Windows build so it measures the WinForms host as well as the client sources.
+the Windows build so it measures the WinForms host as well as the client sources. A duplicated code check covers all
+C#, tests included, so repeated test setup fails CI as well.
 See [AGENTS.md](AGENTS.md#build-and-test) for commands and thresholds.
 
 **Manual end-to-end check:** With a live SSH tunnel and a Linux callback listener, run `authbridge --dry-run URL`

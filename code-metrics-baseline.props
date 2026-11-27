@@ -9,7 +9,9 @@
   </PropertyGroup>
   <PropertyGroup Label="CRAP">
     <crapMethodThreshold>25</crapMethodThreshold>
-    <maxTotalCrapLoad>0.000</maxTotalCrapLoad>
+  </PropertyGroup>
+  <PropertyGroup Label="Duplication">
+    <minCloneTokens>25</minCloneTokens>
   </PropertyGroup>
   <PropertyGroup Label="Mutation">
     <detectedMutants>80</detectedMutants>

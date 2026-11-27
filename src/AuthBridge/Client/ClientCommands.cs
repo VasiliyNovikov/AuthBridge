@@ -10,8 +10,8 @@ internal static class ClientCommands
     /// <summary>How long the client waits for a Windows helper to answer.</summary>
     private static readonly TimeSpan HelperTimeout = TimeSpan.FromSeconds(5);
 
-    public static ClientCommandLine CreateCommand() => new(OpenAllAsync, Wrappers.GcmAsync, Wrappers.NuGetPluginAsync,
-        RelayAsync, CancelAsync,
+    public static ClientCommandLine CreateCommand() => new(new ClientHandlers(OpenAllAsync, Wrappers.GcmAsync, Wrappers.NuGetPluginAsync,
+        RelayAsync, CancelAsync),
         Cli.Command("--status", "Show the connections to Windows helpers.", StatusAsync),
         Cli.Command("--env", "Print the command that sets BROWSER in this shell.", Setup.Env),
         Cli.Command("--setup-shell", "Set BROWSER in new shells.", Setup.Shell),

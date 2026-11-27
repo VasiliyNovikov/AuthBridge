@@ -14,8 +14,17 @@ internal static class TestSupport
     public static HttpServer Serve(Func<HttpRequest, HttpResponse> respond) =>
         HttpServer.Start(new IPEndPoint(IPAddress.Loopback, 0), request => Task.FromResult(respond(request)));
 
-    /// <summary>Settings that fail the test when they report a problem.</summary>
-    public static HostSettings NewSettings(string path) => new(path, message => Assert.Fail(message));
+    /// <summary>Settings that fail the test when they report a problem; without a path, they have no file.</summary>
+    public static HostSettings NewSettings(string? path = null) =>
+        new(path ?? Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()), message => Assert.Fail(message));
+
+    /// <summary>Release checks that have found version 2.0 while 1.0 is installed.</summary>
+    public static async Task<UpdateCheck> OfferUpdateAsync()
+    {
+        var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
+        await releases.RefreshAsync(DateTime.UtcNow);
+        return releases;
+    }
 
     /// <summary>A helper without tunnels that fails the test if it opens a browser.</summary>
     public static Helper NewHelper(Action<string>? openBrowser = null) =>

@@ -219,17 +219,18 @@ public sealed class UpdaterTests
         File.WriteAllBytes(path, [1]);
         using var running = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         var package = new InstalledPackage(directory.FullName);
+        void AssertExecutable(byte content) => CollectionAssert.AreEqual(new[] { content }, File.ReadAllBytes(path));
         await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
             package.InstallAsync(ReleaseZip("authbridge.exe"), () => throw new AssertFailedException("Incomplete archive stopped the helper.")));
-        CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
+        AssertExecutable(1);
 
         var release = ReleaseZip("authbridge.exe", "authbridgew.exe", "authbridge-linux-x64", "authbridge-linux-arm64", "README.md", "LICENSE");
         Assert.IsFalse(await package.InstallAsync(release, () => Task.FromResult(false)));
-        CollectionAssert.AreEqual(new byte[] { 1 }, File.ReadAllBytes(path));
+        AssertExecutable(1);
         Assert.IsTrue(await package.InstallAsync(release, () => Task.FromResult(true)));
 
         Assert.AreEqual(1, running.ReadByte());
-        CollectionAssert.AreEqual(new byte[] { 2 }, File.ReadAllBytes(path));
+        AssertExecutable(2);
     }
 
     private static byte[] ReleaseZip(params string[] files)

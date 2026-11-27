@@ -74,11 +74,14 @@ public sealed class HostCommandTests
         using var output = new StringWriter();
         var control = new HelperControl(() => Task.FromResult(pings.Dequeue()), output, TextWriter.Null);
         var launches = 0;
+        async Task StartAndExpectAsync(string message)
+        {
+            Assert.AreEqual(0, await control.StartAsync(() => launches++, "host.log", TimeSpan.Zero));
+            StringAssert.Contains(output.ToString(), message);
+        }
 
-        Assert.AreEqual(0, await control.StartAsync(() => launches++, "host.log", TimeSpan.Zero));
-        StringAssert.Contains(output.ToString(), "helper started (pid 42)");
-        Assert.AreEqual(0, await control.StartAsync(() => launches++, "host.log", TimeSpan.Zero));
-        StringAssert.Contains(output.ToString(), "helper is running (pid 42)");
+        await StartAndExpectAsync("helper started (pid 42)");
+        await StartAndExpectAsync("helper is running (pid 42)");
         Assert.AreEqual(1, launches);
         Assert.IsEmpty(pings);
     }
@@ -88,7 +91,7 @@ public sealed class HostCommandTests
     {
         using var error = new StringWriter();
         using var output = new StringWriter();
-        var control = new HelperControl(() => Task.FromResult<PingResult?>(null), output, error);
+        var control = Control(null, output, error);
         var launches = 0;
         Assert.AreEqual(1, await control.StartAsync(() => launches++, "test-host.log", TimeSpan.Zero));
         Assert.AreEqual(1, launches);
@@ -126,7 +129,7 @@ public sealed class HostCommandTests
             new("other", "disconnected", "network unavailable", DateTimeOffset.UtcNow)];
         var info = new PingResult(Protocol.Version, 42, 2, tunnels);
         using var output = new StringWriter();
-        var control = new HelperControl(() => Task.FromResult<PingResult?>(info), output, TextWriter.Null);
+        var control = Control(info, output);
 
         Assert.AreEqual(0, await control.StatusAsync(1234));
         var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
@@ -136,4 +139,8 @@ public sealed class HostCommandTests
         StringAssert.StartsWith(lines[2], "  tunnel other: disconnected");
         StringAssert.EndsWith(lines[2], " - network unavailable");
     }
+
+    /// <summary>Helper control whose every ping returns <paramref name="ping"/>.</summary>
+    private static HelperControl Control(PingResult? ping, TextWriter output, TextWriter? error = null) =>
+        new(() => Task.FromResult(ping), output, error ?? TextWriter.Null);
 }

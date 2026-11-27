@@ -90,7 +90,7 @@ public sealed class TrayTests
         var build = new TunnelStatus("build", "disconnected", "network unavailable", since);
         var snapshot = new PingResult(Protocol.Version, 42, 2, [dev, build], "workstation");
         await using var helper = NewHelper();
-        var settings = NewSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        var settings = NewSettings();
         using var updates = new TrayUpdater(settings, new UpdateCheck(_ => Task.FromResult("1.0"), "1.0"), helper);
         using var status = new StatusDialog(SystemIcons.Application, 12345, () => snapshot);
         using var about = new Form();
@@ -139,8 +139,7 @@ public sealed class TrayTests
         using var directory = new TempDirectory("authbridge-tray-stop-");
         var settings = NewSettings(Path.Combine(directory.FullName, "config.json"));
         settings.SetUpdateAutomatically(automatic);
-        var releases = new UpdateCheck(_ => Task.FromResult("2.0"), "1.0");
-        await releases.RefreshAsync(DateTime.UtcNow);
+        var releases = await OfferUpdateAsync();
         await using var helper = StartHelper();
         var updates = new TrayUpdater(settings, releases, helper, _ => Process.GetCurrentProcess());
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -163,7 +162,7 @@ public sealed class TrayTests
         using var stopping = new CancellationTokenSource();
         var releases = new UpdateCheck(_ => { checks++; return pending.Task; }, "1.0", stopping.Token);
         await using var helper = NewHelper();
-        var settings = NewSettings(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        var settings = NewSettings();
         using var tray = new TrayUpdater(settings, releases, helper, _ => throw new AssertFailedException("Checking should not install."));
         var poll = releases.RefreshAsync(DateTime.UtcNow);
         var check = tray.CheckOrUpdateAsync(null);
