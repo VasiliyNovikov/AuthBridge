@@ -160,6 +160,9 @@ One executable, `authbridge`; `Program.cs` runs the Windows or the Linux command
 - Use System.CommandLine for the CLI and WinForms for the Windows tray UI; otherwise use only the base class library.
   Register wire types in the source-generated `Json` context in `Common/Protocol.cs`; on-disk Windows settings use
   `HostConfigJson` in `Host/HostConfig.cs`.
+- Package versions, including those of the file-based apps, live only in `Directory.Packages.props` (central package
+  management): `PackageReference` items and `#:package` directives name a package without a version. `global.json`
+  pins the SDK and MSTest.Sdk, and `dotnet-tools.json` the CRAP and Stryker tools.
 - Bump `Protocol.Version` for incompatible control API changes; both machines must run the same version. When a tunnel
   first connects, the helper replaces an older client with the one in its package, and never downgrades one, so that
   helpers of different versions do not undo each other's updates.

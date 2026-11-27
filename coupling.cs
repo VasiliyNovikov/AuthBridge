@@ -1,8 +1,8 @@
 #!/usr/bin/env dotnet
 #:include eng/Repository.cs
-#:package Microsoft.CodeAnalysis.AnalyzerUtilities@5.6.0
-#:package Microsoft.CodeAnalysis.CSharp.Workspaces@5.12.0
-#:package Microsoft.CodeAnalysis.Workspaces.MSBuild@5.12.0
+#:package Microsoft.CodeAnalysis.AnalyzerUtilities
+#:package Microsoft.CodeAnalysis.CSharp.Workspaces
+#:package Microsoft.CodeAnalysis.Workspaces.MSBuild
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeMetrics;

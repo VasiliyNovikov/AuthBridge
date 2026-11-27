@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.CommandLine" Version="3.0.0" />
+    <PackageReference Include="System.CommandLine" />
     <!-- The tray icon adds a status dot to its images. -->
     <EmbeddedResource Include="AuthBridge.ico" LogicalName="AuthBridge.ico" Condition="'$(UseWindowsForms)' == 'true'" />
     <InternalsVisibleTo Include="AuthBridge.Tests" />

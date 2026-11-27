@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- The compiler packages that coupling.cs and duplication.cs use must stay on one release. -->
+    <RoslynPackageVersion>5.12.0</RoslynPackageVersion>
+  </PropertyGroup>
+
+  <ItemGroup Label="Application">
+    <PackageVersion Include="System.CommandLine" Version="3.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Tests">
+    <PackageVersion Include="coverlet.MTP" Version="10.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="File-based apps">
+    <PackageVersion Include="Microsoft.CodeAnalysis.AnalyzerUtilities" Version="5.6.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="$(RoslynPackageVersion)" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(RoslynPackageVersion)" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="$(RoslynPackageVersion)" />
+  </ItemGroup>
+</Project>

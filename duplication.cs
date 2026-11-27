@@ -1,6 +1,6 @@
 #!/usr/bin/env dotnet
 #:include eng/Repository.cs
-#:package Microsoft.CodeAnalysis.CSharp@5.12.0
+#:package Microsoft.CodeAnalysis.CSharp
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
